@@ -12,6 +12,7 @@ import {
 } from '../types';
 import { storageService } from '../services/storage';
 import { api, ApiError } from '../services/api';
+import { supabase } from '../services/supabase';
 
 export type DeviceWidthMode = 'responsive' | 320 | 360 | 375 | 390 | 412 | 430 | 709;
 
@@ -283,6 +284,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     initSession();
     return () => {
       isMounted = false;
+    };
+  }, [refreshData]);
+
+  // Realtime multi-device database subscription
+  useEffect(() => {
+    const channel = supabase
+      .channel('oscar-db-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dogs' }, () => {
+        refreshData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => {
+        refreshData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'owners' }, () => {
+        refreshData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'status_history' }, () => {
+        refreshData();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
     };
   }, [refreshData]);
 
