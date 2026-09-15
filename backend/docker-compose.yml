@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: oscar_dog_hotel_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: oscar_dog_hotel
+    ports:
+      - "5434:5432"
+    volumes:
+      - oscar_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d oscar_dog_hotel"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oscar_dog_hotel_api
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: 4000
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgrespassword@postgres:5432/oscar_dog_hotel
+      HOTEL_TIMEZONE: Europe/Nicosia
+      JWT_SECRET: oscar_dog_hotel_production_jwt_secret_key_2026!
+      JWT_REFRESH_SECRET: oscar_dog_hotel_production_refresh_secret_key_2026!
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 30d
+      CORS_ORIGIN: "*"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  oscar_pgdata:

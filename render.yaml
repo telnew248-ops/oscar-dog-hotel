@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: oscar-dog-hotel-api
+    runtime: node
+    plan: free
+    region: frankfurt
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        value: postgresql://postgres.steadtxkidcyqebxtmvf:OscarHotel2026%21@aws-1-eu-west-1.pooler.supabase.com:6543/postgres
+      - key: JWT_SECRET
+        value: oscar_dog_hotel_jwt_secret_cloud_2026!
+      - key: CORS_ORIGIN
+        value: "*"
+      - key: HOTEL_TIMEZONE
+        value: Europe/Nicosia
