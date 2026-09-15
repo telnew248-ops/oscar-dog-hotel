@@ -5,6 +5,8 @@ backend/node_modules/
 # Production build outputs
 dist/
 backend/dist/
+apk-output/
+*.zip
 
 # Logs and debug
 *.log
