@@ -49,19 +49,22 @@ export const DashboardPage: React.FC = () => {
 
   const todayStr = useMemo(() => getTodayDateString(), []);
 
-  // Today's relevant dogs: check-in today, check-out today, or active in hotel
-  // Historical bookings ended before today are excluded (Requirement 2)
+  // Today's relevant dogs: Outgoing, Complete, Received, Upcoming, or Cancelled (Requirement 2)
   const todayDogs = useMemo(() => {
     return dogs.filter((d) => {
+      const allowedTodayStatuses = ['OUTGOING', 'COMPLETE', 'RECEIVED', 'UPCOMING', 'CANCEL'];
+      if (!allowedTodayStatuses.includes(d.status)) return false;
+
       // Exclude past completed or cancelled bookings
       if ((d.status === 'COMPLETE' || d.status === 'CANCEL') && d.checkOutDate && d.checkOutDate < todayStr) {
         return false;
       }
-      const isCheckInToday = d.checkInDate === todayStr || d.status === 'RECEIVED';
-      const isCheckOutToday = d.checkOutDate === todayStr || d.status === 'OUTGOING';
-      const isInHotelToday = d.status === 'IN_HOTEL';
+      // Exclude future upcoming bookings beyond today
+      if (d.status === 'UPCOMING' && d.checkInDate && d.checkInDate > todayStr) {
+        return false;
+      }
 
-      return isCheckInToday || isCheckOutToday || isInHotelToday;
+      return true;
     });
   }, [dogs, todayStr]);
 
@@ -441,11 +444,11 @@ export const DashboardPage: React.FC = () => {
           gap: '10px'
         }}
       >
-        {/* In Hotel */}
+        {/* In Hotel - Show all statuses for today (Requirement 2) */}
         <div
           className="card"
           onClick={() => {
-            setFilterState((prev) => ({ ...prev, statusFilter: 'IN_HOTEL' }));
+            setFilterState((prev) => ({ ...prev, statusFilter: 'ALL' }));
             navigate('/dogs');
           }}
           style={{
@@ -468,10 +471,10 @@ export const DashboardPage: React.FC = () => {
               margin: '4px 0'
             }}
           >
-            {stats.inHotelCount}
+            {stats.inHotelTodayAllCount || stats.inHotelCount}
           </div>
           <p style={{ fontSize: '0.72rem', fontWeight: 500, color: '#279967' }}>
-            Active dogs staying
+            All statuses for today
           </p>
         </div>
 

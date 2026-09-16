@@ -13,6 +13,7 @@ import {
 import { storageService } from '../services/storage';
 import { api, ApiError, UserSessionAccount } from '../services/api';
 import { supabase } from '../services/supabase';
+import { getTodayDateString } from '../utils/date';
 
 export type DeviceWidthMode = 'responsive' | 320 | 360 | 375 | 390 | 412 | 430 | 709;
 
@@ -74,6 +75,7 @@ interface AppContextType {
   stats: {
     totalDogs: number;
     inHotelCount: number;
+    inHotelTodayAllCount: number;
     todayCheckIn: number;
     todayCheckOut: number;
     upcomingCount: number;
@@ -253,6 +255,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let isMounted = true;
 
     async function initSession() {
+      const startTime = Date.now();
       try {
         setIsLoadingSession(true);
         const account = await api.auth.validateSession();
@@ -289,9 +292,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setIsAuthenticated(false);
         }
       } finally {
-        if (isMounted) {
-          setIsLoadingSession(false);
-        }
+        const elapsed = Date.now() - startTime;
+        const remainingDelay = Math.max(0, 2000 - elapsed);
+        setTimeout(() => {
+          if (isMounted) {
+            setIsLoadingSession(false);
+          }
+        }, remainingDelay);
       }
     }
 
@@ -505,8 +512,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteDog = async (id: string) => {
     try {
-      await api.dogs.archiveDog(id, 'Deleted by staff');
-      showToast('Dog profile archived successfully.', 'info');
+      await api.dogs.deleteDog(id);
+      // Immediately cascade remove from all app state, alerts, and cached storage (Requirement 5)
+      setDogs((prev) => prev.filter((d) => d.id !== id));
+      setBookings((prev) => prev.filter((b) => b.dogId !== id));
+      setOverdueAttentionList((prev) => prev.filter((o) => o.dogId !== id));
+      storageService.saveDogs(storageService.getDogs().filter((d) => d.id !== id));
+      storageService.saveBookings(storageService.getBookings().filter((b) => b.dogId !== id));
+
+      showToast('Dog profile and all related data deleted completely.', 'info');
       await refreshData();
       navigate('/dogs');
     } catch (err: any) {
@@ -658,9 +672,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Total dogs strictly counts dogs currently present: IN_HOTEL + OUTGOING
     const activeTotalDogs = inHotel + outgoing;
 
+    // In Hotel showing all statuses for today (Requirement 2)
+    const todayDateStr = getTodayDateString();
+    const inHotelTodayAll = dogs.filter((d) => {
+      if (d.status === 'IN_HOTEL') return true;
+      return d.checkInDate === todayDateStr || d.checkOutDate === todayDateStr || d.status === 'RECEIVED' || d.status === 'OUTGOING';
+    }).length;
+
     return {
       totalDogs: activeTotalDogs,
       inHotelCount: inHotel,
+      inHotelTodayAllCount: inHotelTodayAll,
       todayCheckIn: checkInToday,
       todayCheckOut: checkOutToday,
       upcomingCount: upcoming,

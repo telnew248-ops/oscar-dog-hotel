@@ -598,6 +598,53 @@ export const api = {
       return { success: true, isArchived: true, message: 'Dog archived successfully' };
     },
 
+    async deleteDog(id: string) {
+      const orgId = getCurrentOrganizationId();
+
+      // 1. Delete status history associated with this dog's bookings or dog directly
+      const { data: dogBookings } = await supabase
+        .from('bookings')
+        .select('id')
+        .eq('dog_id', id)
+        .eq('organization_id', orgId);
+
+      const bookingIds = (dogBookings || []).map((b: any) => b.id);
+
+      if (bookingIds.length > 0) {
+        await supabase
+          .from('status_history')
+          .delete()
+          .in('booking_id', bookingIds)
+          .eq('organization_id', orgId);
+      }
+
+      await supabase
+        .from('status_history')
+        .delete()
+        .eq('dog_id', id)
+        .eq('organization_id', orgId);
+
+      // 2. Delete all bookings associated with this dog
+      await supabase
+        .from('bookings')
+        .delete()
+        .eq('dog_id', id)
+        .eq('organization_id', orgId);
+
+      // 3. Delete the dog profile record completely
+      const { error: dogErr } = await supabase
+        .from('dogs')
+        .delete()
+        .eq('id', id)
+        .eq('organization_id', orgId);
+
+      if (dogErr) {
+        throw new ApiError(500, 'DB_ERROR', dogErr.message);
+      }
+
+      return { success: true, message: 'Dog profile and all related data completely removed.' };
+    },
+
     async restoreDog(id: string) {
       const orgId = getCurrentOrganizationId();
       const { error } = await supabase

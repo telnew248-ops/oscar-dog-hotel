@@ -231,12 +231,12 @@ export const LoginPage: React.FC = () => {
                     marginBottom: '6px'
                   }}
                 >
-                  Staff Account / Mobile
+                  Type your number
                 </label>
                 <div style={{ position: 'relative' }}>
                   <input
                     type="text"
-                    placeholder="e.g. 99441211, 99677210, 94029020"
+                    placeholder="Type your number"
                     value={staffIdentifier}
                     onChange={(e) => setStaffIdentifier(e.target.value)}
                     autoCapitalize="none"
@@ -379,11 +379,11 @@ export const LoginPage: React.FC = () => {
                       marginBottom: '6px'
                     }}
                   >
-                    Mobile Number or Email
+                    Type your number
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. 99123456 or user@example.com"
+                    placeholder="Type your number"
                     value={userIdentifier}
                     onChange={(e) => setUserIdentifier(e.target.value)}
                     autoCapitalize="none"

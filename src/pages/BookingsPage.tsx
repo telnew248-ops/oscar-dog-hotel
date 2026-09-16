@@ -35,8 +35,8 @@ export const BookingsPage: React.FC = () => {
       // Future dates: ONLY Upcoming, Outgoing, In Hotel (in exact order: 1. Upcoming, 2. Outgoing, 3. In Hotel)
       return ['UPCOMING', 'OUTGOING', 'IN_HOTEL'];
     } else {
-      // Today: All 6 statuses
-      return ['UPCOMING', 'OUTGOING', 'IN_HOTEL', 'RECEIVED', 'COMPLETE', 'CANCEL'];
+      // Today: Show only today’s dog activities: Outgoing, Complete, Received, Upcoming, or Cancelled (Requirement 2)
+      return ['OUTGOING', 'COMPLETE', 'RECEIVED', 'UPCOMING', 'CANCEL'];
     }
   }, [selectedDate, todayStr]);
 

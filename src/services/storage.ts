@@ -11,7 +11,7 @@ const STORAGE_KEYS = {
 export const INITIAL_SETTINGS: AccountSettings = {
   adminName: 'MD Sakib',
   adminAvatar: '/assets/user_avatar.png',
-  version: '1.0.0',
+  version: '1.0.1',
   build: '20260913',
   environment: 'Production'
 };

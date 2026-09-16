@@ -1,11 +1,35 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { DogAvatar } from '../components/common/DogAvatar';
 import { StatusSelector } from '../components/common/StatusSelector';
 import { UniversalStatus } from '../types';
-import { Plus, Check, Scissors, Pill, UtensilsCrossed, Footprints, Award, ShowerHead, RotateCcw } from 'lucide-react';
+import { Plus, Check, Scissors, Pill, UtensilsCrossed, Footprints, Award, ShowerHead, RotateCcw, Search, X, Phone } from 'lucide-react';
 import { storageService } from '../services/storage';
 import { getTodayDateString, addDaysToDateString, compareDateStrings } from '../utils/date';
+import { matchDogSearch } from '../utils/search';
+
+function to24h(timeStr: string): string {
+  if (!timeStr) return '10:00';
+  const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (!match) return timeStr;
+  let hours = parseInt(match[1], 10);
+  const minutes = match[2];
+  const ampm = match[3]?.toUpperCase();
+  if (ampm === 'PM' && hours < 12) hours += 12;
+  if (ampm === 'AM' && hours === 12) hours = 0;
+  return `${String(hours).padStart(2, '0')}:${minutes}`;
+}
+
+function to12h(time24: string): string {
+  if (!time24) return '10:00 AM';
+  const [hStr, mStr] = time24.split(':');
+  let hours = parseInt(hStr, 10);
+  const minutes = mStr || '00';
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+  return `${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
+}
 
 interface BookingDraft {
   selectedDogId: string;
@@ -49,6 +73,26 @@ export const NewBookingPage: React.FC = () => {
   const [bookingStatus, setBookingStatus] = useState<UniversalStatus>(initialDraft.bookingStatus || 'UPCOMING');
   const [selectedServices, setSelectedServices] = useState<string[]>(initialDraft.selectedServices || []);
   const [notes, setNotes] = useState(initialDraft.notes || '');
+
+  // Dog Search states (Requirement 3: Search like Dashboard)
+  const [dogSearchQuery, setDogSearchQuery] = useState('');
+  const [isDogSearchFocused, setIsDogSearchFocused] = useState(false);
+  const dogSearchContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dogSearchContainerRef.current && !dogSearchContainerRef.current.contains(e.target as Node)) {
+        setIsDogSearchFocused(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const matchingDogs = useMemo(() => {
+    if (!dogSearchQuery.trim()) return dogs;
+    return dogs.filter((d) => matchDogSearch(d, dogSearchQuery));
+  }, [dogs, dogSearchQuery]);
 
   // Persistent storage of form draft
   useEffect(() => {
@@ -240,28 +284,131 @@ export const NewBookingPage: React.FC = () => {
             </button>
           </div>
 
-          {/* Dog Selector dropdown */}
-          <div style={{ position: 'relative' }}>
-            <select
-              value={selectedDogId}
-              onChange={(e) => setSelectedDogId(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '12px 14px',
-                borderRadius: '10px',
-                border: '1.5px solid var(--color-border)',
-                backgroundColor: '#ffffff',
-                fontSize: '0.92rem',
-                fontWeight: 600,
-                color: 'var(--color-text-primary)'
-              }}
-            >
-              {dogs.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name} ({d.breed} - {d.ownerName})
-                </option>
-              ))}
-            </select>
+          {/* Dog Search Bar (matching Dashboard search style - Requirement 3) */}
+          <div ref={dogSearchContainerRef} style={{ position: 'relative', width: '100%', zIndex: 20 }}>
+            <div style={{ position: 'relative', width: '100%' }}>
+              <input
+                type="text"
+                placeholder="Search by dog name, breed, owner, or phone..."
+                value={dogSearchQuery}
+                onChange={(e) => {
+                  setDogSearchQuery(e.target.value);
+                  setIsDogSearchFocused(true);
+                }}
+                onFocus={() => setIsDogSearchFocused(true)}
+                style={{
+                  width: '100%',
+                  padding: '12px 42px 12px 40px',
+                  backgroundColor: '#ffffff',
+                  border: isDogSearchFocused ? '1.5px solid var(--color-primary)' : '1.5px solid var(--color-border)',
+                  borderRadius: '10px',
+                  fontSize: '0.92rem',
+                  color: 'var(--color-text-primary)',
+                  outline: 'none',
+                  transition: 'border-color 0.2s ease, box-shadow 0.2s ease'
+                }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  left: '12px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--color-text-secondary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  pointerEvents: 'none'
+                }}
+              >
+                <Search size={18} />
+              </div>
+
+              {dogSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setDogSearchQuery('')}
+                  style={{
+                    position: 'absolute',
+                    right: '12px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: '#e2e8f0',
+                    border: 'none',
+                    borderRadius: '50%',
+                    width: '22px',
+                    height: '22px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    color: '#64748b'
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            {/* Live Search Matching Dropdown */}
+            {isDogSearchFocused && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 4px)',
+                  left: 0,
+                  right: 0,
+                  backgroundColor: '#ffffff',
+                  borderRadius: '10px',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.14)',
+                  border: '1px solid var(--color-border)',
+                  maxHeight: '220px',
+                  overflowY: 'auto',
+                  zIndex: 50
+                }}
+              >
+                {matchingDogs.length === 0 ? (
+                  <div style={{ padding: '12px 14px', fontSize: '0.85rem', color: 'var(--color-text-secondary)', textAlign: 'center' }}>
+                    No dogs found matching "{dogSearchQuery}"
+                  </div>
+                ) : (
+                  matchingDogs.map((dog) => (
+                    <div
+                      key={dog.id}
+                      onClick={() => {
+                        setSelectedDogId(dog.id);
+                        setDogSearchQuery('');
+                        setIsDogSearchFocused(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '10px 14px',
+                        borderBottom: '1px solid #f1f5f9',
+                        cursor: 'pointer',
+                        backgroundColor: selectedDogId === dog.id ? '#f0f7ff' : '#ffffff'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <DogAvatar avatarId={dog.avatarId} size="sm" />
+                        <div>
+                          <p style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                            {dog.name}
+                          </p>
+                          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
+                            {dog.breed} • {dog.ownerName}
+                          </p>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', color: '#64748b' }}>
+                        <Phone size={12} />
+                        <span>{dog.ownerPhone}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
 
           {/* Selected Dog Preview Card */}
@@ -270,22 +417,43 @@ export const NewBookingPage: React.FC = () => {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '12px',
-                padding: '12px',
+                justifyContent: 'space-between',
+                padding: '12px 14px',
                 backgroundColor: '#f7fbff',
                 borderRadius: '12px',
-                border: '1px solid var(--color-border-subtle)'
+                border: '1.5px solid #cce3fe'
               }}
             >
-              <DogAvatar avatarId={selectedDog.avatarId} size="md" />
-              <div>
-                <h4 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
-                  {selectedDog.name}
-                </h4>
-                <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                  {selectedDog.breed} • {selectedDog.age || '2 yrs'} • {selectedDog.gender}
-                </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <DogAvatar avatarId={selectedDog.avatarId} size="md" />
+                <div>
+                  <h4 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+                    {selectedDog.name}
+                  </h4>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                    {selectedDog.breed} • {selectedDog.ownerName} ({selectedDog.ownerPhone})
+                  </p>
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDogSearchFocused(true);
+                  setDogSearchQuery('');
+                }}
+                style={{
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  color: 'var(--color-primary)',
+                  background: '#eaf2ff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '6px 10px',
+                  cursor: 'pointer'
+                }}
+              >
+                Change
+              </button>
             </div>
           )}
         </div>
@@ -339,23 +507,28 @@ export const NewBookingPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Time pickers */}
+          {/* Time pickers / Clock system (Requirement 1: No manual time typing) */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '4px' }}>
                 Check-In Time
               </label>
               <input
-                type="text"
-                value={checkInTime}
-                onChange={(e) => setCheckInTime(e.target.value)}
-                placeholder="10:15 AM"
+                type="time"
+                value={to24h(checkInTime)}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    setCheckInTime(to12h(e.target.value));
+                  }
+                }}
+                onKeyDown={(e) => e.preventDefault()}
                 style={{
                   width: '100%',
-                  padding: '8px 12px',
+                  padding: '9px 12px',
                   borderRadius: '8px',
                   border: '1px solid var(--color-border)',
-                  fontSize: '0.85rem'
+                  fontSize: '0.9rem',
+                  backgroundColor: '#ffffff'
                 }}
               />
             </div>
@@ -365,16 +538,21 @@ export const NewBookingPage: React.FC = () => {
                 Check-Out Time
               </label>
               <input
-                type="text"
-                value={checkOutTime}
-                onChange={(e) => setCheckOutTime(e.target.value)}
-                placeholder="10:00 AM"
+                type="time"
+                value={to24h(checkOutTime)}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    setCheckOutTime(to12h(e.target.value));
+                  }
+                }}
+                onKeyDown={(e) => e.preventDefault()}
                 style={{
                   width: '100%',
-                  padding: '8px 12px',
+                  padding: '9px 12px',
                   borderRadius: '8px',
                   border: '1px solid var(--color-border)',
-                  fontSize: '0.85rem'
+                  fontSize: '0.9rem',
+                  backgroundColor: '#ffffff'
                 }}
               />
             </div>
