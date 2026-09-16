@@ -1,6 +1,8 @@
 import React from 'react';
 import { useApp } from './context/AppContext';
 import { AppShell } from './components/common/AppShell';
+import { SplashScreen } from './components/common/SplashScreen';
+import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { DogsPage } from './pages/DogsPage';
 import { DogDetailsPage } from './pages/DogDetailsPage';
@@ -11,7 +13,15 @@ import { SearchFilterPage } from './pages/SearchFilterPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 export const App: React.FC = () => {
-  const { currentRoute } = useApp();
+  const { currentRoute, isLoadingSession, isAuthenticated } = useApp();
+
+  if (isLoadingSession) {
+    return <SplashScreen />;
+  }
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
 
   const renderCurrentPage = () => {
     if (currentRoute === '/dashboard' || currentRoute === '' || currentRoute === '/') {

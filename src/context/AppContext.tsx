@@ -11,7 +11,7 @@ import {
   OverdueAttentionDog
 } from '../types';
 import { storageService } from '../services/storage';
-import { api, ApiError } from '../services/api';
+import { api, ApiError, UserSessionAccount } from '../services/api';
 import { supabase } from '../services/supabase';
 
 export type DeviceWidthMode = 'responsive' | 320 | 360 | 375 | 390 | 412 | 430 | 709;
@@ -34,6 +34,12 @@ interface AppContextType {
 
   // Backend Integration State
   backendSession: BackendSessionState;
+  sessionAccount: UserSessionAccount | null;
+  isAuthenticated: boolean;
+  isLoadingSession: boolean;
+  login: (identifier: string, password: string) => Promise<void>;
+  createAccount: (identifier: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
   overdueAttentionList: OverdueAttentionDog[];
   refreshData: () => Promise<void>;
 
@@ -156,6 +162,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>(() => storageService.getRecentSearches());
   const [overdueAttentionList, setOverdueAttentionList] = useState<OverdueAttentionDog[]>([]);
 
+  const [sessionAccount, setSessionAccount] = useState<UserSessionAccount | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isLoadingSession, setIsLoadingSession] = useState<boolean>(true);
+
   // Backend session state
   const [backendSession, setBackendSession] = useState<BackendSessionState>({
     isConnected: false,
@@ -237,46 +247,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
-  // Initialize backend session on startup
+  // Initialize backend session on startup (Persistent Login / Auto Login)
   useEffect(() => {
     let isMounted = true;
 
     async function initSession() {
       try {
-        setBackendSession((prev) => ({ ...prev, isAuthenticating: true }));
-        // 1. Authenticate with shared staff account if not already logged in
-        let account: any;
-        try {
-          account = await api.auth.getAccount();
-        } catch {
-          // Attempt automatic login with shared staff account
-          const loginRes = await api.auth.login();
-          account = loginRes.account;
-        }
-
-        if (isMounted && account) {
-          setBackendSession({
-            isConnected: true,
-            isAuthenticating: false,
-            staffEmail: account.email || 'admin@oscardoghotel.com',
-            hotelName: account.hotelName || 'Oscar Dog Hotel',
-            lastSyncAt: new Date().toLocaleTimeString(),
-            error: null
-          });
-          // 2. Fetch fresh data from backend
-          await refreshData();
+        setIsLoadingSession(true);
+        const account = await api.auth.validateSession();
+        if (isMounted) {
+          if (account) {
+            setSessionAccount(account);
+            setIsAuthenticated(true);
+            setBackendSession({
+              isConnected: true,
+              isAuthenticating: false,
+              staffEmail: account.identifier,
+              hotelName: account.hotelName || 'Oscar Dog Hotel',
+              lastSyncAt: new Date().toLocaleTimeString(),
+              error: null
+            });
+            await refreshData();
+          } else {
+            setSessionAccount(null);
+            setIsAuthenticated(false);
+            setBackendSession({
+              isConnected: false,
+              isAuthenticating: false,
+              staffEmail: null,
+              hotelName: 'Oscar Dog Hotel',
+              lastSyncAt: null,
+              error: null
+            });
+          }
         }
       } catch (err: any) {
         if (isMounted) {
-          console.warn('[BACKEND AUTH] Backend is offline or starting up, using local state:', err);
-          setBackendSession({
-            isConnected: false,
-            isAuthenticating: false,
-            staffEmail: 'admin@oscardoghotel.com',
-            hotelName: 'Oscar Dog Hotel',
-            lastSyncAt: null,
-            error: err.message || 'Could not connect to backend'
-          });
+          console.warn('[BACKEND AUTH] Session check failed:', err);
+          setSessionAccount(null);
+          setIsAuthenticated(false);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingSession(false);
         }
       }
     }
@@ -286,6 +299,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isMounted = false;
     };
   }, [refreshData]);
+
+  // Midnight / Periodic refresh to keep TODAY dynamic
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshData();
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [refreshData]);
+
+  const login = async (identifier: string, password: string) => {
+    const res = await api.auth.login(identifier, password);
+    setSessionAccount(res.account);
+    setIsAuthenticated(true);
+    setBackendSession({
+      isConnected: true,
+      isAuthenticating: false,
+      staffEmail: res.account.identifier,
+      hotelName: res.account.hotelName || 'Oscar Dog Hotel',
+      lastSyncAt: new Date().toLocaleTimeString(),
+      error: null
+    });
+    showToast(`Welcome back, ${res.account.displayName}!`, 'success');
+    await refreshData();
+    navigate('/dashboard');
+  };
+
+  const createAccount = async (identifier: string, password: string) => {
+    const res = await api.auth.createAccount(identifier, password);
+    setSessionAccount(res.account);
+    setIsAuthenticated(true);
+    setBackendSession({
+      isConnected: true,
+      isAuthenticating: false,
+      staffEmail: res.account.identifier,
+      hotelName: 'Personal Account',
+      lastSyncAt: new Date().toLocaleTimeString(),
+      error: null
+    });
+    showToast('Account registered successfully!', 'success');
+    await refreshData();
+    navigate('/dashboard');
+  };
+
+  const logout = async () => {
+    await api.auth.logout();
+    setSessionAccount(null);
+    setIsAuthenticated(false);
+    setDogs([]);
+    setBookings([]);
+    showToast('Logged out successfully.', 'info');
+  };
 
   // Realtime multi-device database subscription
   useEffect(() => {
@@ -570,12 +634,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const resetAllData = () => {
-    storageService.resetToDefault();
-    setDogs(storageService.getDogs());
-    setBookings(storageService.getBookings());
-    setSettings(storageService.getSettings());
-    setRecentSearches(storageService.getRecentSearches());
-    showToast('Application reset to default dataset.', 'info');
+    showToast('Reset Demo Data is disabled in production mode.', 'info');
   };
 
   const getDogById = (id: string) => dogs.find((d) => d.id === id);
@@ -624,6 +683,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         navigate,
         goBack,
         backendSession,
+        sessionAccount,
+        isAuthenticated,
+        isLoadingSession,
+        login,
+        createAccount,
+        logout,
         overdueAttentionList,
         refreshData,
         addDog,

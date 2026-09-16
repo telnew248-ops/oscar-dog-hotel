@@ -6,13 +6,17 @@ interface StatusSelectorProps {
   currentStatus: UniversalStatus | string;
   onSelect: (status: UniversalStatus) => void;
   disabled?: boolean;
+  allowedStatuses?: UniversalStatus[];
 }
 
 export const StatusSelector: React.FC<StatusSelectorProps> = ({
   currentStatus,
   onSelect,
-  disabled = false
+  disabled = false,
+  allowedStatuses
 }) => {
+  const statusList = allowedStatuses || UNIVERSAL_STATUS_LIST;
+
   return (
     <div
       style={{
@@ -22,7 +26,7 @@ export const StatusSelector: React.FC<StatusSelectorProps> = ({
         width: '100%'
       }}
     >
-      {UNIVERSAL_STATUS_LIST.map((statusKey) => {
+      {statusList.map((statusKey) => {
         const config = getStatusConfig(statusKey);
         const isSelected = currentStatus === statusKey;
 

@@ -5,6 +5,7 @@ import { StatusBadge } from '../components/common/StatusBadge';
 import { UniversalStatus } from '../types';
 import { Search, X, ChevronRight, Clock, Trash2, Phone, ArrowRight } from 'lucide-react';
 import { matchDogSearch } from '../utils/search';
+import { getTodayDateString, addDaysToDateString } from '../utils/date';
 
 export const SearchFilterPage: React.FC = () => {
   const {
@@ -51,8 +52,8 @@ export const SearchFilterPage: React.FC = () => {
   const [datePreset, setDatePreset] = useState<'ALL' | 'TODAY' | 'THIS_WEEK' | 'THIS_MONTH' | 'CUSTOM'>(
     filterState.dateRangeFilter || 'ALL'
   );
-  const [fromDate, setFromDate] = useState('2026-09-12');
-  const [toDate, setToDate] = useState('2026-09-20');
+  const [fromDate, setFromDate] = useState(() => getTodayDateString());
+  const [toDate, setToDate] = useState(() => addDaysToDateString(getTodayDateString(), 7));
   const [hasSearched, setHasSearched] = useState(false);
 
   const statusOptions: { label: string; key: UniversalStatus | 'ALL' }[] = [

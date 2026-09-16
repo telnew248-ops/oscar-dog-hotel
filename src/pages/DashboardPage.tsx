@@ -4,6 +4,7 @@ import { DogAvatar } from '../components/common/DogAvatar';
 import { StatusBadge } from '../components/common/StatusBadge';
 import { Search, ArrowRight, ShieldCheck, Heart, Sparkles, Clock, AlertTriangle, Phone, X } from 'lucide-react';
 import { matchDogSearch } from '../utils/search';
+import { getTodayDateString, formatDisplayDate } from '../utils/date';
 
 export const DashboardPage: React.FC = () => {
   const { dogs, stats, navigate, setFilterState, overdueAttentionList } = useApp();
@@ -46,8 +47,31 @@ export const DashboardPage: React.FC = () => {
     return dogs.filter((d) => matchDogSearch(d, localSearch));
   }, [dogs, localSearch]);
 
-  // Recent 5 dogs for today's check in/out
-  const todayDogs = dogs.slice(0, 5);
+  const todayStr = useMemo(() => getTodayDateString(), []);
+
+  // Today's relevant dogs: check-in today, check-out today, or active in hotel
+  // Historical bookings ended before today are excluded (Requirement 2)
+  const todayDogs = useMemo(() => {
+    return dogs.filter((d) => {
+      // Exclude past completed or cancelled bookings
+      if ((d.status === 'COMPLETE' || d.status === 'CANCEL') && d.checkOutDate && d.checkOutDate < todayStr) {
+        return false;
+      }
+      const isCheckInToday = d.checkInDate === todayStr || d.status === 'RECEIVED';
+      const isCheckOutToday = d.checkOutDate === todayStr || d.status === 'OUTGOING';
+      const isInHotelToday = d.status === 'IN_HOTEL';
+
+      return isCheckInToday || isCheckOutToday || isInHotelToday;
+    });
+  }, [dogs, todayStr]);
+
+  // Upcoming dogs starting after today
+  const upcomingDogs = useMemo(() => {
+    return dogs.filter((d) => {
+      if (d.status === 'COMPLETE' || d.status === 'CANCEL') return false;
+      return (d.checkInDate && d.checkInDate > todayStr) || d.status === 'UPCOMING';
+    });
+  }, [dogs, todayStr]);
 
   return (
     <div className="dashboard-page" style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -409,15 +433,15 @@ export const DashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Summary Cards: Today Check-In & Today Check-Out */}
+      {/* Summary Cards: In Hotel, Today Check-In, Today Check-Out, Upcoming */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-          gap: '12px'
+          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+          gap: '10px'
         }}
       >
-        {/* Today Check-In */}
+        {/* In Hotel */}
         <div
           className="card"
           onClick={() => {
@@ -429,25 +453,59 @@ export const DashboardPage: React.FC = () => {
             border: '1px solid #e1f3eb',
             borderLeft: '4px solid #219763',
             cursor: 'pointer',
-            padding: '16px'
+            padding: '14px'
           }}
         >
-          <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+          <p style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+            In Hotel
+          </p>
+          <div
+            style={{
+              fontSize: '1.9rem',
+              fontWeight: 800,
+              color: '#219763',
+              lineHeight: 1.1,
+              margin: '4px 0'
+            }}
+          >
+            {stats.inHotelCount}
+          </div>
+          <p style={{ fontSize: '0.72rem', fontWeight: 500, color: '#279967' }}>
+            Active dogs staying
+          </p>
+        </div>
+
+        {/* Today Check-In */}
+        <div
+          className="card"
+          onClick={() => {
+            setFilterState((prev) => ({ ...prev, statusFilter: 'RECEIVED' }));
+            navigate('/dogs');
+          }}
+          style={{
+            backgroundColor: '#ffffff',
+            border: '1px solid #e6f0fa',
+            borderLeft: '4px solid #1267df',
+            cursor: 'pointer',
+            padding: '14px'
+          }}
+        >
+          <p style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
             Today Check-In
           </p>
           <div
             style={{
-              fontSize: '2.2rem',
+              fontSize: '1.9rem',
               fontWeight: 800,
-              color: '#219763',
+              color: '#1267df',
               lineHeight: 1.1,
-              margin: '6px 0'
+              margin: '4px 0'
             }}
           >
             {stats.todayCheckIn}
           </div>
-          <p style={{ fontSize: '0.74rem', fontWeight: 500, color: '#279967' }}>
-            Dogs checked in today
+          <p style={{ fontSize: '0.72rem', fontWeight: 500, color: '#3b82f6' }}>
+            Dogs checking in today
           </p>
         </div>
 
@@ -463,25 +521,59 @@ export const DashboardPage: React.FC = () => {
             border: '1px solid #fce8eb',
             borderLeft: '4px solid #df2145',
             cursor: 'pointer',
-            padding: '16px'
+            padding: '14px'
           }}
         >
-          <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+          <p style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
             Today Check-Out
           </p>
           <div
             style={{
-              fontSize: '2.2rem',
+              fontSize: '1.9rem',
               fontWeight: 800,
               color: '#df2145',
               lineHeight: 1.1,
-              margin: '6px 0'
+              margin: '4px 0'
             }}
           >
             {stats.todayCheckOut}
           </div>
-          <p style={{ fontSize: '0.74rem', fontWeight: 500, color: '#e33b59' }}>
-            Dogs checking out today
+          <p style={{ fontSize: '0.72rem', fontWeight: 500, color: '#e33b59' }}>
+            Departures today
+          </p>
+        </div>
+
+        {/* Upcoming */}
+        <div
+          className="card"
+          onClick={() => {
+            setFilterState((prev) => ({ ...prev, statusFilter: 'UPCOMING' }));
+            navigate('/dogs');
+          }}
+          style={{
+            backgroundColor: '#ffffff',
+            border: '1px solid #fef3c7',
+            borderLeft: '4px solid #d97706',
+            cursor: 'pointer',
+            padding: '14px'
+          }}
+        >
+          <p style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+            Upcoming
+          </p>
+          <div
+            style={{
+              fontSize: '1.9rem',
+              fontWeight: 800,
+              color: '#d97706',
+              lineHeight: 1.1,
+              margin: '4px 0'
+            }}
+          >
+            {stats.upcomingCount}
+          </div>
+          <p style={{ fontSize: '0.72rem', fontWeight: 500, color: '#b45309' }}>
+            Future reservations
           </p>
         </div>
       </div>
@@ -552,7 +644,7 @@ export const DashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* Today's Check-In & Out List Section */}
+      {/* Today's Activities List Section */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         <div
           style={{
@@ -563,10 +655,10 @@ export const DashboardPage: React.FC = () => {
         >
           <div>
             <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
-              Today’s Check-In & Out
+              Today’s Activities
             </h3>
             <p style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
-              Dogs arriving and leaving today
+              Check-ins, departures, and active stays for today
             </p>
           </div>
           <button
@@ -586,68 +678,180 @@ export const DashboardPage: React.FC = () => {
           </button>
         </div>
 
-        {/* Dog rows */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {todayDogs.map((dog) => (
-            <div
-              key={dog.id}
-              className="card"
-              onClick={() => navigate(`/dogs/${dog.id}`)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '12px 14px',
-                cursor: 'pointer',
-                transition: 'transform 0.15s ease, box-shadow 0.15s ease'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <DogAvatar avatarId={dog.avatarId} size="md" />
-                <div>
-                  <h4
-                    style={{
-                      fontSize: '0.98rem',
-                      fontWeight: 800,
-                      color: 'var(--color-text-primary)'
-                    }}
-                  >
-                    {dog.name}
-                  </h4>
-                  <p
-                    style={{
-                      fontSize: '0.8rem',
-                      color: 'var(--color-text-secondary)'
-                    }}
-                  >
-                    {dog.ownerName}
-                  </p>
-                </div>
-              </div>
-
+        {/* Dog rows or empty state */}
+        {todayDogs.length === 0 ? (
+          <div className="card" style={{ padding: '24px 16px', textAlign: 'center', backgroundColor: '#ffffff' }}>
+            <p style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+              No check-ins, departures, or active stays today
+            </p>
+            <p style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+              All daily hotel activities are currently up to date.
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {todayDogs.map((dog) => (
               <div
+                key={dog.id}
+                className="card"
+                onClick={() => navigate(`/dogs/${dog.id}`)}
                 style={{
                   display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'flex-end',
-                  gap: '4px'
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '12px 14px',
+                  cursor: 'pointer',
+                  transition: 'transform 0.15s ease, box-shadow 0.15s ease'
                 }}
               >
-                <span
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <DogAvatar avatarId={dog.avatarId} size="md" />
+                  <div>
+                    <h4
+                      style={{
+                        fontSize: '0.98rem',
+                        fontWeight: 800,
+                        color: 'var(--color-text-primary)'
+                      }}
+                    >
+                      {dog.name}
+                    </h4>
+                    <p
+                      style={{
+                        fontSize: '0.8rem',
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      {dog.breed} • {dog.ownerName}
+                    </p>
+                  </div>
+                </div>
+
+                <div
                   style={{
-                    fontSize: '0.78rem',
-                    color: 'var(--color-text-secondary)',
-                    fontWeight: 500
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-end',
+                    gap: '4px'
                   }}
                 >
-                  {dog.checkInTime || '10:15 AM'}
-                </span>
-                <StatusBadge status={dog.status} size="sm" />
+                  <span
+                    style={{
+                      fontSize: '0.78rem',
+                      color: 'var(--color-text-secondary)',
+                      fontWeight: 500
+                    }}
+                  >
+                    {dog.checkInTime || '10:15 AM'}
+                  </span>
+                  <StatusBadge status={dog.status} size="sm" />
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* Upcoming Reservations (Starting after today) */}
+      {upcomingDogs.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}
+          >
+            <div>
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+                Upcoming Reservations
+              </h3>
+              <p style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+                Bookings starting after today
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setFilterState((prev) => ({ ...prev, statusFilter: 'UPCOMING' }));
+                navigate('/bookings');
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                color: 'var(--color-primary)'
+              }}
+            >
+              <span>View All</span>
+              <ArrowRight size={14} />
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {upcomingDogs.slice(0, 5).map((dog) => (
+              <div
+                key={dog.id}
+                className="card"
+                onClick={() => navigate(`/dogs/${dog.id}`)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '12px 14px',
+                  cursor: 'pointer',
+                  transition: 'transform 0.15s ease, box-shadow 0.15s ease'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <DogAvatar avatarId={dog.avatarId} size="md" />
+                  <div>
+                    <h4
+                      style={{
+                        fontSize: '0.98rem',
+                        fontWeight: 800,
+                        color: 'var(--color-text-primary)'
+                      }}
+                    >
+                      {dog.name}
+                    </h4>
+                    <p
+                      style={{
+                        fontSize: '0.8rem',
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      {dog.breed} • {dog.ownerName}
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-end',
+                    gap: '4px'
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: '0.78rem',
+                      color: 'var(--color-primary)',
+                      fontWeight: 700
+                    }}
+                  >
+                    Starts {formatDisplayDate(dog.checkInDate || '')}
+                  </span>
+                  <StatusBadge status={dog.status} size="sm" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

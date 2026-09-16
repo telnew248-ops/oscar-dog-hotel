@@ -2,10 +2,10 @@ import React, { useState, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { storageService } from '../services/storage';
 import { api } from '../services/api';
-import { Download, RotateCcw, LogOut, Code, Camera, Check, Cloud, Database, Mail, Image as ImageIcon, Upload } from 'lucide-react';
+import { Download, LogOut, Code, Camera, Check, Cloud, Database, Mail, Image as ImageIcon, Upload } from 'lucide-react';
 
 export const SettingsPage: React.FC = () => {
-  const { settings, updateSettings, showToast, resetAllData, navigate, backendSession, refreshData } = useApp();
+  const { settings, updateSettings, showToast, backendSession, refreshData, sessionAccount, logout } = useApp();
 
   const [fullName, setFullName] = useState(settings.adminName || 'MD Sakib');
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
@@ -72,10 +72,9 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleExit = () => {
-    if (window.confirm('Are you sure you want to log out / exit?')) {
-      showToast('Session logged out.', 'info');
-      navigate('/dashboard');
+  const handleExit = async () => {
+    if (window.confirm('Are you sure you want to log out of your session?')) {
+      await logout();
     }
   };
 
@@ -346,30 +345,6 @@ export const SettingsPage: React.FC = () => {
             <Download size={16} />
             <span>Export Data</span>
           </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              if (window.confirm('Reset all dogs and bookings to default demo data?')) {
-                resetAllData();
-              }
-            }}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              backgroundColor: '#edf2fa',
-              color: 'var(--color-text-primary)',
-              border: '1px solid var(--color-border)',
-              padding: '10px 16px',
-              borderRadius: '8px',
-              fontSize: '0.88rem',
-              fontWeight: 600
-            }}
-          >
-            <RotateCcw size={16} />
-            <span>Reset Demo Data</span>
-          </button>
         </div>
       </div>
 
@@ -379,17 +354,17 @@ export const SettingsPage: React.FC = () => {
           <Database size={18} color="var(--color-primary)" />
           <div>
             <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
-              Backend & Database Status
+              Cloud Database & Session
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-              Live PostgreSQL & REST API connection
+              Supabase Cloud PostgreSQL & live synchronization
             </p>
           </div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', backgroundColor: 'var(--color-surface)', padding: '12px', borderRadius: '8px', fontSize: '0.82rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: 'var(--color-text-secondary)' }}>API Status</span>
+            <span style={{ color: 'var(--color-text-secondary)' }}>Connection Status</span>
             <span style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -397,14 +372,28 @@ export const SettingsPage: React.FC = () => {
               fontWeight: 700,
               color: backendSession.isConnected ? '#219763' : '#df2145'
             }}>
-              ● {backendSession.isConnected ? 'Connected (Port 4000)' : 'Offline / Standalone'}
+              ● {backendSession.isConnected ? 'Connected (Supabase Cloud)' : 'Offline / Standalone'}
             </span>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: 'var(--color-text-secondary)' }}>Staff Account</span>
+            <span style={{ color: 'var(--color-text-secondary)' }}>Logged-in Account</span>
+            <span style={{ fontWeight: 700, color: 'var(--color-text-primary)' }}>
+              {sessionAccount?.identifier || backendSession.staffEmail || 'Staff Member'}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ color: 'var(--color-text-secondary)' }}>Organization / Hotel</span>
             <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
-              {backendSession.staffEmail || 'admin@oscardoghotel.com'}
+              {sessionAccount?.hotelName || 'Oscar Dog Hotel'}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ color: 'var(--color-text-secondary)' }}>Account Type</span>
+            <span style={{ fontWeight: 600, color: '#1267df' }}>
+              {sessionAccount?.role === 'STAFF' ? 'Staff (Shared Hotel Access)' : 'Personal Customer Account'}
             </span>
           </div>
 
@@ -502,7 +491,7 @@ export const SettingsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Exit Action */}
+      {/* Log Out Action */}
       <button
         type="button"
         onClick={handleExit}
@@ -518,11 +507,12 @@ export const SettingsPage: React.FC = () => {
           borderRadius: 'var(--radius-sm)',
           fontSize: '0.95rem',
           fontWeight: 700,
-          marginTop: '6px'
+          marginTop: '6px',
+          cursor: 'pointer'
         }}
       >
         <LogOut size={18} />
-        <span>Exit</span>
+        <span>Log Out</span>
       </button>
     </div>
   );

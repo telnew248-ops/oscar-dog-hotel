@@ -1,9 +1,11 @@
 /**
  * Oscar Dog Hotel API Service Layer
  * Direct Supabase Integration (Serverless & Realtime)
+ * Supports Multi-Staff Concurrent Sessions and Organization Data Isolation
  */
 
 import { supabase } from './supabase';
+import { getTodayDateString, toDateString } from '../utils/date';
 
 export class ApiError extends Error {
   public readonly code: string;
@@ -19,28 +21,49 @@ export class ApiError extends Error {
   }
 }
 
-// Token storage helpers (Maintains backward compatibility with auth state)
-const TOKEN_STORAGE_KEY = 'oscar_access_token';
-const REFRESH_TOKEN_STORAGE_KEY = 'oscar_refresh_token';
+export interface UserSessionAccount {
+  id: string;
+  identifier: string;
+  displayName: string;
+  role: 'STAFF' | 'NORMAL';
+  organizationId: string;
+  hotelName: string;
+}
 
-export const tokenStorage = {
+// Session storage helpers (Independent per-device tokens)
+const SESSION_TOKEN_KEY = 'oscar_session_token';
+const SESSION_ACCOUNT_KEY = 'oscar_session_account';
+
+export const sessionManager = {
   getToken(): string | null {
-    return localStorage.getItem(TOKEN_STORAGE_KEY);
+    return localStorage.getItem(SESSION_TOKEN_KEY);
   },
-  setToken(token: string) {
-    localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  getAccount(): UserSessionAccount | null {
+    const raw = localStorage.getItem(SESSION_ACCOUNT_KEY);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
   },
-  getRefreshToken(): string | null {
-    return localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
-  },
-  setRefreshToken(token: string) {
-    localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, token);
+  setSession(token: string, account: UserSessionAccount) {
+    localStorage.setItem(SESSION_TOKEN_KEY, token);
+    localStorage.setItem(SESSION_ACCOUNT_KEY, JSON.stringify(account));
   },
   clear() {
-    localStorage.removeItem(TOKEN_STORAGE_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+    localStorage.removeItem(SESSION_TOKEN_KEY);
+    localStorage.removeItem(SESSION_ACCOUNT_KEY);
   }
 };
+
+/**
+ * Helper to get currently active organization ID
+ */
+export function getCurrentOrganizationId(): string {
+  const account = sessionManager.getAccount();
+  return account?.organizationId || '00000000-0000-0000-0000-000000000001';
+}
 
 /**
  * Phone Number Normalization & Display Formatting
@@ -183,6 +206,7 @@ export function formatBookingResponse(b: any, currentTime: Date = new Date()) {
     id: b.id,
     dogId: b.dog_id || b.dogId,
     dog_id: b.dog_id || b.dogId,
+    organizationId: b.organization_id || b.organizationId,
     checkInAt: checkInDate,
     check_in_at: checkInDate,
     checkOutAt: checkOutDate,
@@ -218,6 +242,7 @@ export function formatDogResponse(dog: any, relevantBooking?: any) {
 
   return {
     id: dog.id,
+    organizationId: dog.organization_id,
     name: dog.name,
     breed: dog.breed,
     dateOfBirth: dog.date_of_birth,
@@ -255,57 +280,113 @@ export function formatDogResponse(dog: any, relevantBooking?: any) {
 }
 
 export const api = {
-  // Shared Staff Auth
+  // Authentication & Sessions (Supports Multi-Staff Concurrent Sessions)
   auth: {
-    async login(email = 'admin@oscardoghotel.com', _password = 'OscarHotel2026!') {
-      const { data } = await supabase
-        .from('shared_accounts')
-        .select('*')
-        .eq('email', email)
-        .maybeSingle();
+    async login(identifier: string, password: string): Promise<{ token: string; account: UserSessionAccount }> {
+      const cleanIdent = identifier.trim();
+      const { data, error } = await supabase.rpc('app_login', {
+        p_identifier: cleanIdent,
+        p_password: password
+      });
 
-      const account = data || {
-        id: 'shared-staff-admin',
-        email,
-        display_name: 'Staff Member',
-        hotel_name: 'Oscar Dog Hotel'
+      if (error) {
+        throw new ApiError(500, 'AUTH_ERROR', error.message);
+      }
+
+      if (!data || !data.success) {
+        throw new ApiError(401, 'INVALID_CREDENTIALS', data?.error || 'Invalid account number or password.');
+      }
+
+      const account: UserSessionAccount = {
+        id: data.account.id,
+        identifier: data.account.identifier,
+        displayName: data.account.displayName,
+        role: data.account.role,
+        organizationId: data.account.organizationId,
+        hotelName: data.account.role === 'STAFF' ? 'Oscar Dog Hotel' : 'Personal Account'
       };
 
-      tokenStorage.setToken('supabase-active-session');
+      sessionManager.setSession(data.token, account);
+      return { token: data.token, account };
+    },
 
-      return {
-        accessToken: 'supabase-active-session',
-        refreshToken: '',
-        account: {
-          id: account.id,
-          email: account.email,
-          displayName: account.display_name || 'Staff Member',
-          hotelName: account.hotel_name || 'Oscar Dog Hotel'
+    async createAccount(identifier: string, password: string): Promise<{ token: string; account: UserSessionAccount }> {
+      const cleanIdent = identifier.trim();
+      const { data, error } = await supabase.rpc('app_create_account', {
+        p_identifier: cleanIdent,
+        p_password: password
+      });
+
+      if (error) {
+        throw new ApiError(500, 'AUTH_ERROR', error.message);
+      }
+
+      if (!data || !data.success) {
+        throw new ApiError(400, 'REGISTRATION_ERROR', data?.error || 'Failed to create account.');
+      }
+
+      const account: UserSessionAccount = {
+        id: data.account.id,
+        identifier: data.account.identifier,
+        displayName: data.account.displayName,
+        role: data.account.role,
+        organizationId: data.account.organizationId,
+        hotelName: 'Personal Account'
+      };
+
+      sessionManager.setSession(data.token, account);
+      return { token: data.token, account };
+    },
+
+    async validateSession(): Promise<UserSessionAccount | null> {
+      const token = sessionManager.getToken();
+      if (!token) return null;
+
+      try {
+        const { data, error } = await supabase.rpc('app_validate_session', { p_token: token });
+        if (error || !data || !data.valid) {
+          sessionManager.clear();
+          return null;
         }
-      };
+
+        const account: UserSessionAccount = {
+          id: data.account.id,
+          identifier: data.account.identifier,
+          displayName: data.account.displayName,
+          role: data.account.role,
+          organizationId: data.account.organizationId,
+          hotelName: data.account.role === 'STAFF' ? 'Oscar Dog Hotel' : 'Personal Account'
+        };
+
+        sessionManager.setSession(token, account);
+        return account;
+      } catch {
+        return sessionManager.getAccount();
+      }
     },
 
-    async getAccount() {
-      const { data } = await supabase
-        .from('shared_accounts')
-        .select('*')
-        .limit(1)
-        .maybeSingle();
-
-      return {
-        id: data?.id || 'staff-1',
-        email: data?.email || 'admin@oscardoghotel.com',
-        displayName: data?.display_name || 'Staff Member',
-        hotelName: data?.hotel_name || 'Oscar Dog Hotel'
-      };
+    async getAccount(): Promise<UserSessionAccount | null> {
+      const account = sessionManager.getAccount();
+      if (!account) {
+        return this.validateSession();
+      }
+      return account;
     },
 
-    async logout() {
-      tokenStorage.clear();
+    async logout(): Promise<void> {
+      const token = sessionManager.getToken();
+      if (token) {
+        try {
+          await supabase.rpc('app_logout', { p_token: token });
+        } catch (err) {
+          console.warn('Logout RPC failed:', err);
+        }
+      }
+      sessionManager.clear();
     }
   },
 
-  // Dogs Management
+  // Dogs Management (Scoped by Organization)
   dogs: {
     async listDogs(params?: {
       search?: string;
@@ -314,9 +395,11 @@ export const api = {
       page?: number;
       pageSize?: number;
     }) {
+      const orgId = getCurrentOrganizationId();
       let query = supabase
         .from('dogs')
         .select('*, owner:owners(*), bookings(*)')
+        .eq('organization_id', orgId)
         .order('name', { ascending: true });
 
       if (!params?.archived) {
@@ -343,10 +426,12 @@ export const api = {
     },
 
     async getDogById(id: string) {
+      const orgId = getCurrentOrganizationId();
       const { data, error } = await supabase
         .from('dogs')
         .select('*, owner:owners(*), bookings(*)')
         .eq('id', id)
+        .eq('organization_id', orgId)
         .single();
 
       if (error || !data) {
@@ -369,14 +454,16 @@ export const api = {
       ownerEmail?: string;
       confirmExistingOwnerId?: string;
     }) {
+      const orgId = getCurrentOrganizationId();
       const normalizedPhone = normalizePhone(data.ownerPhone);
       const displayPhone = formatDisplayPhone(normalizedPhone);
 
-      // 1. Phone-First Owner Matching Rule
+      // 1. Phone-First Owner Matching Rule (Scoped to Current Organization)
       const { data: existingOwners, error: searchErr } = await supabase
         .from('owners')
         .select('*')
-        .eq('normalized_phone', normalizedPhone);
+        .eq('normalized_phone', normalizedPhone)
+        .eq('organization_id', orgId);
 
       if (searchErr) {
         throw new ApiError(500, 'DB_ERROR', searchErr.message);
@@ -416,6 +503,7 @@ export const api = {
         const { data: newOwner, error: insertOwnerErr } = await supabase
           .from('owners')
           .insert({
+            organization_id: orgId,
             name: data.ownerName.trim(),
             normalized_phone: normalizedPhone,
             display_phone: displayPhone,
@@ -435,6 +523,7 @@ export const api = {
       const { data: newDog, error: insertDogErr } = await supabase
         .from('dogs')
         .insert({
+          organization_id: orgId,
           owner_id: ownerId,
           name: data.name.trim(),
           breed: data.breed.trim(),
@@ -469,6 +558,7 @@ export const api = {
         ownerId: string;
       }>
     ) {
+      const orgId = getCurrentOrganizationId();
       const patch: any = { updated_at: new Date().toISOString() };
       if (updates.name !== undefined) patch.name = updates.name.trim();
       if (updates.breed !== undefined) patch.breed = updates.breed.trim();
@@ -483,6 +573,7 @@ export const api = {
         .from('dogs')
         .update(patch)
         .eq('id', id)
+        .eq('organization_id', orgId)
         .select('*, owner:owners(*), bookings(*)')
         .single();
 
@@ -494,10 +585,12 @@ export const api = {
     },
 
     async archiveDog(id: string, _reason?: string) {
+      const orgId = getCurrentOrganizationId();
       const { error } = await supabase
         .from('dogs')
         .update({ is_archived: true, updated_at: new Date().toISOString() })
-        .eq('id', id);
+        .eq('id', id)
+        .eq('organization_id', orgId);
 
       if (error) {
         throw new ApiError(500, 'DB_ERROR', error.message);
@@ -506,10 +599,12 @@ export const api = {
     },
 
     async restoreDog(id: string) {
+      const orgId = getCurrentOrganizationId();
       const { error } = await supabase
         .from('dogs')
         .update({ is_archived: false, updated_at: new Date().toISOString() })
-        .eq('id', id);
+        .eq('id', id)
+        .eq('organization_id', orgId);
 
       if (error) {
         throw new ApiError(500, 'DB_ERROR', error.message);
@@ -518,7 +613,7 @@ export const api = {
     }
   },
 
-  // Bookings Management
+  // Bookings Management (Scoped by Organization)
   bookings: {
     async listBookings(params?: {
       status?: string;
@@ -528,9 +623,11 @@ export const api = {
       page?: number;
       pageSize?: number;
     }) {
+      const orgId = getCurrentOrganizationId();
       let query = supabase
         .from('bookings')
         .select('*, dog:dogs(*, owner:owners(*))')
+        .eq('organization_id', orgId)
         .order('check_in_at', { ascending: false });
 
       if (params?.status && params.status !== 'ALL') {
@@ -550,10 +647,12 @@ export const api = {
     },
 
     async getBookingById(id: string) {
+      const orgId = getCurrentOrganizationId();
       const { data, error } = await supabase
         .from('bookings')
         .select('*, dog:dogs(*, owner:owners(*))')
         .eq('id', id)
+        .eq('organization_id', orgId)
         .single();
 
       if (error || !data) {
@@ -571,6 +670,7 @@ export const api = {
       services?: string[];
       notes?: string;
     }) {
+      const orgId = getCurrentOrganizationId();
       const checkInDate = new Date(data.checkInAt);
       const checkOutDate = new Date(data.checkOutAt);
 
@@ -588,6 +688,7 @@ export const api = {
         .from('dogs')
         .select('id, name, is_archived')
         .eq('id', data.dogId)
+        .eq('organization_id', orgId)
         .single();
 
       if (dogErr || !dog) {
@@ -607,6 +708,7 @@ export const api = {
         .from('bookings')
         .select('id, check_in_at, check_out_at, current_status')
         .eq('dog_id', data.dogId)
+        .eq('organization_id', orgId)
         .neq('current_status', 'CANCEL')
         .lt('check_in_at', checkOutDate.toISOString())
         .gt('check_out_at', checkInDate.toISOString());
@@ -637,6 +739,7 @@ export const api = {
       const { data: newBooking, error: insertErr } = await supabase
         .from('bookings')
         .insert({
+          organization_id: orgId,
           dog_id: data.dogId,
           check_in_at: checkInDate.toISOString(),
           check_out_at: checkOutDate.toISOString(),
@@ -654,6 +757,7 @@ export const api = {
 
       // 5. Insert Status History Record
       await supabase.from('status_history').insert({
+        organization_id: orgId,
         booking_id: newBooking.id,
         previous_status: null,
         new_status: initialStatus,
@@ -673,6 +777,7 @@ export const api = {
         notes?: string | null;
       }
     ) {
+      const orgId = getCurrentOrganizationId();
       const patch: any = { updated_at: new Date().toISOString() };
       if (data.checkInAt) patch.check_in_at = new Date(data.checkInAt).toISOString();
       if (data.checkOutAt) patch.check_out_at = new Date(data.checkOutAt).toISOString();
@@ -683,6 +788,7 @@ export const api = {
         .from('bookings')
         .update(patch)
         .eq('id', id)
+        .eq('organization_id', orgId)
         .select('*, dog:dogs(*, owner:owners(*))')
         .single();
 
@@ -694,12 +800,14 @@ export const api = {
     },
 
     async extendBooking(id: string, newCheckOutAtStr: string, notes?: string) {
+      const orgId = getCurrentOrganizationId();
       const newCheckOutAt = new Date(newCheckOutAtStr);
 
       const { data: current, error: getErr } = await supabase
         .from('bookings')
         .select('*')
         .eq('id', id)
+        .eq('organization_id', orgId)
         .single();
 
       if (getErr || !current) {
@@ -720,6 +828,7 @@ export const api = {
         .from('bookings')
         .select('id, check_in_at, check_out_at, current_status')
         .eq('dog_id', current.dog_id)
+        .eq('organization_id', orgId)
         .neq('id', id)
         .neq('current_status', 'CANCEL')
         .lt('check_in_at', newCheckOutAt.toISOString())
@@ -747,6 +856,7 @@ export const api = {
           updated_at: new Date().toISOString()
         })
         .eq('id', id)
+        .eq('organization_id', orgId)
         .select('*, dog:dogs(*, owner:owners(*))')
         .single();
 
@@ -763,10 +873,12 @@ export const api = {
       effectiveAt: string = new Date().toISOString(),
       notes?: string
     ) {
+      const orgId = getCurrentOrganizationId();
       const { data: current, error: getErr } = await supabase
         .from('bookings')
         .select('current_status')
         .eq('id', id)
+        .eq('organization_id', orgId)
         .single();
 
       if (getErr || !current) {
@@ -786,6 +898,7 @@ export const api = {
         .from('bookings')
         .update(patch)
         .eq('id', id)
+        .eq('organization_id', orgId)
         .select('*, dog:dogs(*, owner:owners(*))')
         .single();
 
@@ -794,6 +907,7 @@ export const api = {
       }
 
       await supabase.from('status_history').insert({
+        organization_id: orgId,
         booking_id: id,
         previous_status: current.current_status,
         new_status: status,
@@ -805,6 +919,7 @@ export const api = {
     },
 
     async confirmOutgoing(id: string) {
+      const orgId = getCurrentOrganizationId();
       const { data: updated, error: updateErr } = await supabase
         .from('bookings')
         .update({
@@ -813,6 +928,7 @@ export const api = {
           updated_at: new Date().toISOString()
         })
         .eq('id', id)
+        .eq('organization_id', orgId)
         .select('*, dog:dogs(*, owner:owners(*))')
         .single();
 
@@ -821,6 +937,7 @@ export const api = {
       }
 
       await supabase.from('status_history').insert({
+        organization_id: orgId,
         booking_id: id,
         previous_status: 'IN_HOTEL',
         new_status: 'OUTGOING',
@@ -832,15 +949,23 @@ export const api = {
     }
   },
 
-  // Dashboard Aggregates & Overdue Attention
+  // Dashboard Aggregates & Overdue Attention (Filtered to Relevant Dates Only)
   dashboard: {
     async getDashboardMetrics() {
+      const orgId = getCurrentOrganizationId();
       const now = new Date();
-      const todayStr = now.toISOString().split('T')[0];
+      const todayStr = getTodayDateString();
 
       const [{ count: totalDogs }, { data: bookingsData }] = await Promise.all([
-        supabase.from('dogs').select('*', { count: 'exact', head: true }).eq('is_archived', false),
-        supabase.from('bookings').select('*, dog:dogs(*, owner:owners(*))')
+        supabase
+          .from('dogs')
+          .select('*', { count: 'exact', head: true })
+          .eq('organization_id', orgId)
+          .eq('is_archived', false),
+        supabase
+          .from('bookings')
+          .select('*, dog:dogs(*, owner:owners(*))')
+          .eq('organization_id', orgId)
       ]);
 
       const allBookings = (bookingsData || []).map((b: any) => formatBookingResponse(b, now));
@@ -864,14 +989,14 @@ export const api = {
           countsMap[b.status]++;
         }
 
-        const inDateStr = b.checkInAt ? b.checkInAt.split('T')[0] : '';
-        const outDateStr = b.checkOutAt ? b.checkOutAt.split('T')[0] : '';
+        const inDateStr = toDateString(b.checkInAt);
+        const outDateStr = toDateString(b.checkOutAt);
 
         if (inDateStr === todayStr) todayCheckIn++;
         if (outDateStr === todayStr) todayCheckOut++;
 
         // Overdue check
-        if (b.attention.requiresAttention) {
+        if (b.attention?.requiresAttention) {
           overdueAttentionList.push({
             bookingId: b.id,
             dogId: b.dogId,
@@ -887,7 +1012,12 @@ export const api = {
           });
         }
 
-        if (inDateStr === todayStr || outDateStr === todayStr) {
+        // Relevant to Today only (arriving today, leaving today, or active in-hotel today)
+        // Strictly exclude historical completed/cancelled stays from before today
+        const isTouchingToday = inDateStr === todayStr || outDateStr === todayStr;
+        const isActiveInHotel = (b.status === 'IN_HOTEL' || b.status === 'OUTGOING') && inDateStr <= todayStr && outDateStr >= todayStr;
+
+        if ((isTouchingToday || isActiveInHotel) && b.status !== 'COMPLETE' && b.status !== 'CANCEL') {
           todayCheckInOut.push({
             bookingId: b.id,
             dogId: b.dogId,

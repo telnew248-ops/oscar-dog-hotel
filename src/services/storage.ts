@@ -4,7 +4,8 @@ const STORAGE_KEYS = {
   DOGS: 'oscar_dog_hotel_dogs',
   BOOKINGS: 'oscar_dog_hotel_bookings',
   SETTINGS: 'oscar_dog_hotel_settings',
-  RECENT_SEARCHES: 'oscar_dog_hotel_recent_searches'
+  RECENT_SEARCHES: 'oscar_dog_hotel_recent_searches',
+  BOOKING_DRAFT: 'oscar_dog_hotel_booking_draft'
 };
 
 export const INITIAL_SETTINGS: AccountSettings = {
@@ -474,11 +475,30 @@ class StorageService {
     return JSON.stringify(data, null, 2);
   }
 
+  getBookingDraft<T>(): T | null {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.BOOKING_DRAFT);
+      return data ? JSON.parse(data) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  saveBookingDraft<T>(draft: T | null): void {
+    if (draft === null) {
+      localStorage.removeItem(STORAGE_KEYS.BOOKING_DRAFT);
+    } else {
+      localStorage.setItem(STORAGE_KEYS.BOOKING_DRAFT, JSON.stringify(draft));
+    }
+  }
+
+  clearBookingDraft(): void {
+    localStorage.removeItem(STORAGE_KEYS.BOOKING_DRAFT);
+  }
+
   resetToDefault(): void {
-    this.saveDogs(INITIAL_DOGS);
-    this.saveBookings(INITIAL_BOOKINGS);
-    this.saveSettings(INITIAL_SETTINGS);
-    this.saveRecentSearches(INITIAL_SEARCHES);
+    // Disabled in production to safeguard database integrity
+    console.warn('[STORAGE] Demo reset is disabled in production.');
   }
 }
 

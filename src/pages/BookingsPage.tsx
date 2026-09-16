@@ -1,15 +1,18 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { DogAvatar } from '../components/common/DogAvatar';
 import { StatusBadge } from '../components/common/StatusBadge';
 import { UniversalStatus } from '../types';
 import { Plus, ChevronLeft, ChevronRight, Phone } from 'lucide-react';
+import { getTodayDateString, addDaysToDateString, compareDateStrings, formatDisplayDate } from '../utils/date';
+import { getStatusConfig } from '../constants/statuses';
 
 export const BookingsPage: React.FC = () => {
   const { bookings, dogs, navigate } = useApp();
 
+  const todayStr = useMemo(() => getTodayDateString(), []);
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [activeStatus, setActiveStatus] = useState<UniversalStatus | 'ALL'>('ALL');
-  const [selectedDate, setSelectedDate] = useState<string>('2026-09-12');
 
   // Link bookings to dogs
   const enrichedBookings = useMemo(() => {
@@ -22,41 +25,69 @@ export const BookingsPage: React.FC = () => {
     });
   }, [bookings, dogs]);
 
-  // Filter based on status
-  const filteredBookings = useMemo(() => {
+  // Date-Aware Status Rules (Requirements 9, 10, 11, 12, 13)
+  const allowedStatuses: UniversalStatus[] = useMemo(() => {
+    const cmp = compareDateStrings(selectedDate, todayStr);
+    if (cmp < 0) {
+      // Past dates: ONLY Complete, Cancel, Received
+      return ['COMPLETE', 'CANCEL', 'RECEIVED'];
+    } else if (cmp > 0) {
+      // Future dates: ONLY Upcoming, Outgoing, In Hotel (in exact order: 1. Upcoming, 2. Outgoing, 3. In Hotel)
+      return ['UPCOMING', 'OUTGOING', 'IN_HOTEL'];
+    } else {
+      // Today: All 6 statuses
+      return ['UPCOMING', 'OUTGOING', 'IN_HOTEL', 'RECEIVED', 'COMPLETE', 'CANCEL'];
+    }
+  }, [selectedDate, todayStr]);
+
+  // Reset active status to 'ALL' if it becomes disallowed on date change
+  useEffect(() => {
+    if (activeStatus !== 'ALL' && !allowedStatuses.includes(activeStatus)) {
+      setActiveStatus('ALL');
+    }
+  }, [allowedStatuses, activeStatus]);
+
+  // Bookings active or scheduled on selectedDate
+  const dateBookings = useMemo(() => {
     return enrichedBookings.filter((b) => {
-      if (activeStatus === 'ALL') return true;
+      if (b.checkInDate && b.checkOutDate) {
+        return b.checkInDate <= selectedDate && b.checkOutDate >= selectedDate;
+      }
+      return b.checkInDate === selectedDate || b.checkOutDate === selectedDate;
+    });
+  }, [enrichedBookings, selectedDate]);
+
+  // Filter based on activeStatus and date-allowed statuses
+  const filteredBookings = useMemo(() => {
+    return dateBookings.filter((b) => {
+      if (activeStatus === 'ALL') {
+        return allowedStatuses.includes(b.status);
+      }
       return b.status === activeStatus;
     });
-  }, [enrichedBookings, activeStatus]);
+  }, [dateBookings, activeStatus, allowedStatuses]);
 
-  // Tab counts
-  const counts = useMemo(() => {
-    return {
-      ALL: bookings.length,
-      UPCOMING: bookings.filter((b) => b.status === 'UPCOMING').length,
-      IN_HOTEL: bookings.filter((b) => b.status === 'IN_HOTEL').length,
-      OUTGOING: bookings.filter((b) => b.status === 'OUTGOING').length,
-      CANCEL: bookings.filter((b) => b.status === 'CANCEL').length,
-      RECEIVED: bookings.filter((b) => b.status === 'RECEIVED').length,
-      COMPLETE: bookings.filter((b) => b.status === 'COMPLETE').length
-    };
-  }, [bookings]);
+  // Dynamic filter tabs respecting allowedStatuses sequence
+  const filterTabs = useMemo(() => {
+    const tabs: { label: string; key: UniversalStatus | 'ALL'; count: number }[] = [
+      { label: 'All', key: 'ALL', count: dateBookings.filter((b) => allowedStatuses.includes(b.status)).length }
+    ];
 
-  const filterTabs: { label: string; key: UniversalStatus | 'ALL'; count: number }[] = [
-    { label: 'All', key: 'ALL', count: counts.ALL },
-    { label: 'Upcoming', key: 'UPCOMING', count: counts.UPCOMING },
-    { label: 'In Hotel', key: 'IN_HOTEL', count: counts.IN_HOTEL },
-    { label: 'Outgoing', key: 'OUTGOING', count: counts.OUTGOING },
-    { label: 'Cancel', key: 'CANCEL', count: counts.CANCEL },
-    { label: 'Received', key: 'RECEIVED', count: counts.RECEIVED },
-    { label: 'Complete', key: 'COMPLETE', count: counts.COMPLETE }
-  ];
+    allowedStatuses.forEach((st) => {
+      const count = dateBookings.filter((b) => b.status === st).length;
+      const config = getStatusConfig(st);
+      tabs.push({
+        label: config.label,
+        key: st,
+        count
+      });
+    });
+
+    return tabs;
+  }, [allowedStatuses, dateBookings]);
 
   const shiftDate = (days: number) => {
-    const current = new Date(selectedDate);
-    current.setDate(current.getDate() + days);
-    setSelectedDate(current.toISOString().split('T')[0]);
+    setSelectedDate((prev) => addDaysToDateString(prev, days));
   };
 
   return (
@@ -141,20 +172,26 @@ export const BookingsPage: React.FC = () => {
 
         <div style={{ textAlign: 'center' }}>
           <p style={{ fontSize: '0.92rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
-            {selectedDate === '2026-09-12' ? 'Today, Sep 12, 2026' : selectedDate}
+            {selectedDate === todayStr ? `Today, ${formatDisplayDate(selectedDate)}` : formatDisplayDate(selectedDate)}
           </p>
-          <button
-            type="button"
-            onClick={() => setSelectedDate('2026-09-12')}
-            style={{
-              fontSize: '0.72rem',
-              fontWeight: 700,
-              color: 'var(--color-primary)',
-              textDecoration: 'underline'
-            }}
-          >
-            Jump to Today
-          </button>
+          {selectedDate !== todayStr && (
+            <button
+              type="button"
+              onClick={() => setSelectedDate(todayStr)}
+              style={{
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                color: 'var(--color-primary)',
+                textDecoration: 'underline',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '2px 4px'
+              }}
+            >
+              Jump to Today
+            </button>
+          )}
         </div>
 
         <button

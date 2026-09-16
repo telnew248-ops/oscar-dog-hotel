@@ -1,21 +1,103 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { DogAvatar } from '../components/common/DogAvatar';
 import { StatusSelector } from '../components/common/StatusSelector';
 import { UniversalStatus } from '../types';
-import { Plus, Check, Scissors, Pill, UtensilsCrossed, Footprints, Award, ShowerHead } from 'lucide-react';
+import { Plus, Check, Scissors, Pill, UtensilsCrossed, Footprints, Award, ShowerHead, RotateCcw } from 'lucide-react';
+import { storageService } from '../services/storage';
+import { getTodayDateString, addDaysToDateString, compareDateStrings } from '../utils/date';
+
+interface BookingDraft {
+  selectedDogId: string;
+  checkInDate: string;
+  checkInTime: string;
+  checkOutDate: string;
+  checkOutTime: string;
+  bookingStatus: UniversalStatus;
+  selectedServices: string[];
+  notes: string;
+}
 
 export const NewBookingPage: React.FC = () => {
   const { dogs, addBooking, navigate, showToast } = useApp();
 
-  const [selectedDogId, setSelectedDogId] = useState<string>(dogs[0]?.id || '');
-  const [checkInDate, setCheckInDate] = useState<string>('2026-09-12');
-  const [checkInTime, setCheckInTime] = useState<string>('10:15 AM');
-  const [checkOutDate, setCheckOutDate] = useState<string>('2026-09-15');
-  const [checkOutTime, setCheckOutTime] = useState<string>('10:00 AM');
-  const [bookingStatus, setBookingStatus] = useState<UniversalStatus>('UPCOMING');
-  const [selectedServices, setSelectedServices] = useState<string[]>([]);
-  const [notes, setNotes] = useState('');
+  const todayStr = useMemo(() => getTodayDateString(), []);
+  const defaultCheckOutStr = useMemo(() => addDaysToDateString(todayStr, 3), [todayStr]);
+
+  const initialDraft = useMemo(() => {
+    const saved = storageService.getBookingDraft<BookingDraft>();
+    if (saved) {
+      return saved;
+    }
+    return {
+      selectedDogId: dogs[0]?.id || '',
+      checkInDate: todayStr,
+      checkInTime: '10:15 AM',
+      checkOutDate: defaultCheckOutStr,
+      checkOutTime: '10:00 AM',
+      bookingStatus: 'UPCOMING' as UniversalStatus,
+      selectedServices: [] as string[],
+      notes: ''
+    };
+  }, [dogs, todayStr, defaultCheckOutStr]);
+
+  const [selectedDogId, setSelectedDogId] = useState<string>(initialDraft.selectedDogId || dogs[0]?.id || '');
+  const [checkInDate, setCheckInDate] = useState<string>(initialDraft.checkInDate || todayStr);
+  const [checkInTime, setCheckInTime] = useState<string>(initialDraft.checkInTime || '10:15 AM');
+  const [checkOutDate, setCheckOutDate] = useState<string>(initialDraft.checkOutDate || defaultCheckOutStr);
+  const [checkOutTime, setCheckOutTime] = useState<string>(initialDraft.checkOutTime || '10:00 AM');
+  const [bookingStatus, setBookingStatus] = useState<UniversalStatus>(initialDraft.bookingStatus || 'UPCOMING');
+  const [selectedServices, setSelectedServices] = useState<string[]>(initialDraft.selectedServices || []);
+  const [notes, setNotes] = useState(initialDraft.notes || '');
+
+  // Persistent storage of form draft
+  useEffect(() => {
+    storageService.saveBookingDraft({
+      selectedDogId,
+      checkInDate,
+      checkInTime,
+      checkOutDate,
+      checkOutTime,
+      bookingStatus,
+      selectedServices,
+      notes
+    });
+  }, [selectedDogId, checkInDate, checkInTime, checkOutDate, checkOutTime, bookingStatus, selectedServices, notes]);
+
+  // Date-Aware Allowed Statuses (Requirements 9-13)
+  const allowedStatuses: UniversalStatus[] = useMemo(() => {
+    const cmp = compareDateStrings(checkInDate, todayStr);
+    if (cmp < 0) {
+      // Past dates: ONLY Complete, Cancel, Received
+      return ['COMPLETE', 'CANCEL', 'RECEIVED'];
+    } else if (cmp > 0) {
+      // Future dates: ONLY Upcoming, Outgoing, In Hotel (in exact order)
+      return ['UPCOMING', 'OUTGOING', 'IN_HOTEL'];
+    } else {
+      // Today: All 6 statuses
+      return ['UPCOMING', 'OUTGOING', 'IN_HOTEL', 'RECEIVED', 'COMPLETE', 'CANCEL'];
+    }
+  }, [checkInDate, todayStr]);
+
+  // Ensure selected status remains within allowed statuses
+  useEffect(() => {
+    if (!allowedStatuses.includes(bookingStatus)) {
+      setBookingStatus(allowedStatuses[0]);
+    }
+  }, [allowedStatuses, bookingStatus]);
+
+  const handleResetForm = () => {
+    storageService.clearBookingDraft();
+    setSelectedDogId(dogs[0]?.id || '');
+    setCheckInDate(todayStr);
+    setCheckInTime('10:15 AM');
+    setCheckOutDate(defaultCheckOutStr);
+    setCheckOutTime('10:00 AM');
+    setBookingStatus('UPCOMING');
+    setSelectedServices([]);
+    setNotes('');
+    showToast('Booking form cleared.', 'info');
+  };
 
   const selectedDog = useMemo(() => {
     return dogs.find((d) => d.id === selectedDogId) || dogs[0];
@@ -77,6 +159,7 @@ export const NewBookingPage: React.FC = () => {
         durationNights
       });
 
+      storageService.clearBookingDraft();
       navigate('/bookings');
     } catch (err: any) {
       if (err.code === 'BOOKING_OVERLAP') {
@@ -94,13 +177,35 @@ export const NewBookingPage: React.FC = () => {
   return (
     <div className="new-booking-page" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       {/* Page Header */}
-      <div>
-        <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--color-text-primary)', lineHeight: 1.15 }}>
-          New Booking
-        </h2>
-        <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-          Create a new reservation
-        </p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--color-text-primary)', lineHeight: 1.15 }}>
+            New Booking
+          </h2>
+          <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+            Create a new reservation
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleResetForm}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            backgroundColor: '#f1f5f9',
+            color: 'var(--color-text-secondary)',
+            border: '1px solid var(--color-border)',
+            padding: '7px 12px',
+            borderRadius: '8px',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          <RotateCcw size={14} />
+          <span>Clear Form</span>
+        </button>
       </div>
 
       <form onSubmit={handleCreateBooking} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -310,6 +415,7 @@ export const NewBookingPage: React.FC = () => {
           <StatusSelector
             currentStatus={bookingStatus}
             onSelect={(st) => setBookingStatus(st)}
+            allowedStatuses={allowedStatuses}
           />
         </div>
 
