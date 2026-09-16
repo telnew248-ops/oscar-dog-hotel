@@ -60,6 +60,7 @@ export interface BookingService {
 export interface Booking {
   id: string;
   dogId: string;
+  dog?: Dog;
   checkInDate: string;
   checkInTime?: string;
   checkOutDate: string;

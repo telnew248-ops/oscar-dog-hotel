@@ -142,6 +142,7 @@ function mapBackendBookingToFrontend(b: any): Booking {
   return {
     id: b.id,
     dogId: b.dogId || b.dog_id,
+    dog: b.dog ? mapBackendDogToFrontend(b.dog) : undefined,
     checkInDate: b.checkInLocal?.dateFormatted || b.checkInAt?.split('T')[0] || b.check_in_at?.split('T')[0] || 'Sep 12, 2026',
     checkInTime: b.checkInLocal?.timeFormatted || '10:00 AM',
     checkOutDate: b.checkOutLocal?.dateFormatted || b.checkOutAt?.split('T')[0] || b.check_out_at?.split('T')[0] || 'Sep 15, 2026',

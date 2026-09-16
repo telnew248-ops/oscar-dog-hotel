@@ -17,7 +17,7 @@ export const BookingsPage: React.FC = () => {
   // Link bookings to dogs
   const enrichedBookings = useMemo(() => {
     return bookings.map((b) => {
-      const dog = dogs.find((d) => d.id === b.dogId);
+      const dog = dogs.find((d) => d.id === b.dogId) || b.dog;
       return {
         ...b,
         dog
@@ -47,34 +47,24 @@ export const BookingsPage: React.FC = () => {
     }
   }, [allowedStatuses, activeStatus]);
 
-  // Bookings active or scheduled on selectedDate
-  const dateBookings = useMemo(() => {
-    return enrichedBookings.filter((b) => {
-      if (b.checkInDate && b.checkOutDate) {
-        return b.checkInDate <= selectedDate && b.checkOutDate >= selectedDate;
-      }
-      return b.checkInDate === selectedDate || b.checkOutDate === selectedDate;
-    });
-  }, [enrichedBookings, selectedDate]);
-
   // Filter based on activeStatus and date-allowed statuses
   const filteredBookings = useMemo(() => {
-    return dateBookings.filter((b) => {
+    return enrichedBookings.filter((b) => {
       if (activeStatus === 'ALL') {
         return allowedStatuses.includes(b.status);
       }
       return b.status === activeStatus;
     });
-  }, [dateBookings, activeStatus, allowedStatuses]);
+  }, [enrichedBookings, activeStatus, allowedStatuses]);
 
   // Dynamic filter tabs respecting allowedStatuses sequence
   const filterTabs = useMemo(() => {
     const tabs: { label: string; key: UniversalStatus | 'ALL'; count: number }[] = [
-      { label: 'All', key: 'ALL', count: dateBookings.filter((b) => allowedStatuses.includes(b.status)).length }
+      { label: 'All', key: 'ALL', count: enrichedBookings.filter((b) => allowedStatuses.includes(b.status)).length }
     ];
 
     allowedStatuses.forEach((st) => {
-      const count = dateBookings.filter((b) => b.status === st).length;
+      const count = enrichedBookings.filter((b) => b.status === st).length;
       const config = getStatusConfig(st);
       tabs.push({
         label: config.label,
@@ -84,7 +74,7 @@ export const BookingsPage: React.FC = () => {
     });
 
     return tabs;
-  }, [allowedStatuses, dateBookings]);
+  }, [allowedStatuses, enrichedBookings]);
 
   const shiftDate = (days: number) => {
     setSelectedDate((prev) => addDaysToDateString(prev, days));
