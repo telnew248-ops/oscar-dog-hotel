@@ -63,16 +63,21 @@ export const DashboardPage: React.FC = () => {
       if (d.status === 'UPCOMING' && d.checkInDate && d.checkInDate > todayStr) {
         return false;
       }
+      // Exclude past UPCOMING (missed check-in) — they appear in Action Required instead
+      if (d.status === 'UPCOMING' && d.checkInDate && d.checkInDate < todayStr) {
+        return false;
+      }
 
       return true;
     });
   }, [dogs, todayStr]);
 
-  // Upcoming dogs starting after today
+  // Upcoming dogs starting strictly after today (future dates only)
   const upcomingDogs = useMemo(() => {
     return dogs.filter((d) => {
-      if (d.status === 'COMPLETE' || d.status === 'CANCEL') return false;
-      return (d.checkInDate && d.checkInDate > todayStr) || d.status === 'UPCOMING';
+      if (d.status !== 'UPCOMING') return false;
+      // Only show if check-in date is in the future (strictly after today)
+      return d.checkInDate && d.checkInDate > todayStr;
     });
   }, [dogs, todayStr]);
 

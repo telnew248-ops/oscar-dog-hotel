@@ -1042,7 +1042,7 @@ export const api = {
         if (inDateStr === todayStr) todayCheckIn++;
         if (outDateStr === todayStr) todayCheckOut++;
 
-        // Overdue check
+        // Overdue check: IN_HOTEL or OUTGOING past checkout
         if (b.attention?.requiresAttention) {
           overdueAttentionList.push({
             bookingId: b.id,
@@ -1056,6 +1056,28 @@ export const api = {
             scheduledCheckOutFormatted: `${b.checkOutLocal.dateFormatted} at ${b.checkOutLocal.timeFormatted}`,
             currentStatus: b.status,
             attention: b.attention
+          });
+        }
+
+        // Overdue check: UPCOMING bookings whose check-in date has already passed (no-show / missed arrival)
+        if (b.status === 'UPCOMING' && new Date(b.checkInAt) < now) {
+          overdueAttentionList.push({
+            bookingId: b.id,
+            dogId: b.dogId,
+            dogName: b.dog?.name || 'Unknown',
+            dogBreed: b.dog?.breed || 'Unknown Breed',
+            dogAvatarId: b.dog?.avatar_id || 'avatar_1',
+            ownerName: b.dog?.owner?.name || 'Unknown Owner',
+            ownerPhone: b.dog?.owner?.display_phone || b.dog?.owner?.normalized_phone || '',
+            scheduledCheckOut: b.checkOutAt,
+            scheduledCheckOutFormatted: `${b.checkOutLocal.dateFormatted} at ${b.checkOutLocal.timeFormatted}`,
+            currentStatus: b.status,
+            attention: {
+              requiresAttention: true,
+              attentionType: 'MISSED_CHECKIN' as const,
+              isOverdue: true,
+              overdueMinutes: Math.floor((now.getTime() - new Date(b.checkInAt).getTime()) / (1000 * 60))
+            }
           });
         }
 

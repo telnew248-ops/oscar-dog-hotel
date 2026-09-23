@@ -440,7 +440,7 @@ export const SettingsPage: React.FC = () => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--color-border-subtle)' }}>
             <span style={{ color: 'var(--color-text-secondary)' }}>Developer Contact</span>
             <a
-              href="mailto:info.sakib.manager@gmail.com"
+              href="mailto:Info.developer.connect@gmail.com"
               style={{
                 fontWeight: 700,
                 color: 'var(--color-primary)',
@@ -451,7 +451,7 @@ export const SettingsPage: React.FC = () => {
               }}
             >
               <Mail size={14} />
-              <span>info.sakib.manager@gmail.com</span>
+              <span>Info.developer.connect@gmail.com</span>
             </a>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--color-border-subtle)' }}>
@@ -468,7 +468,7 @@ export const SettingsPage: React.FC = () => {
           </div>
 
           <a
-            href="mailto:info.sakib.manager@gmail.com?subject=Oscar%20Dog%20Hotel%20-%20Support%20Inquiry"
+            href="mailto:Info.developer.connect@gmail.com?subject=Oscar%20Dog%20Hotel%20-%20Support%20Inquiry"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -486,7 +486,7 @@ export const SettingsPage: React.FC = () => {
             }}
           >
             <Mail size={16} />
-            <span>Contact Developer (info.sakib.manager@gmail.com)</span>
+            <span>Contact Developer (Info.developer.connect@gmail.com)</span>
           </a>
         </div>
       </div>
