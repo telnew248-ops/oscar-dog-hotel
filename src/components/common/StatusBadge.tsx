@@ -3,7 +3,7 @@ import { getStatusConfig } from '../../constants/statuses';
 import { UniversalStatus } from '../../types';
 
 interface StatusBadgeProps {
-  status: UniversalStatus | string;
+  status?: UniversalStatus | string | null;
   size?: 'sm' | 'md' | 'lg';
   showIcon?: boolean;
   className?: string;

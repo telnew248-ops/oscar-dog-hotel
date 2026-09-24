@@ -70,14 +70,26 @@ export const UNIVERSAL_STATUS_LIST: UniversalStatus[] = [
   'OUTGOING'
 ];
 
-export function getStatusConfig(status: string | undefined): StatusConfig {
-  if (status && status in STATUSES) {
+export const NO_RESERVATION_CONFIG: StatusConfig = {
+  id: 'NO_RESERVATION' as any,
+  label: 'No reservation',
+  color: '#6b7280',
+  bgColor: '#f3f4f6',
+  badgeColor: '#9ca3af',
+  icon: '—'
+};
+
+export function getStatusConfig(status: string | null | undefined): StatusConfig {
+  if (!status || status === 'NO_RESERVATION' || status === 'No active booking') {
+    return NO_RESERVATION_CONFIG;
+  }
+  if (status in STATUSES) {
     return STATUSES[status as UniversalStatus];
   }
   // Normalization fallback if lower or spaced
-  const upper = (status || '').toUpperCase().replace(/\s+/g, '_');
+  const upper = status.toUpperCase().replace(/\s+/g, '_');
   if (upper in STATUSES) {
     return STATUSES[upper as UniversalStatus];
   }
-  return STATUSES.IN_HOTEL;
+  return NO_RESERVATION_CONFIG;
 }

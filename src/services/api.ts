@@ -161,27 +161,37 @@ export function getCheckoutAttentionState(booking: any, currentTime: Date = new 
 }
 
 /**
- * Pick the relevant operational booking for a dog from a list of bookings
+ * Pick the relevant operational booking for a dog from a list of bookings.
+ * Priority:
+ *   1. Currently active booking (checkIn <= now <= checkOut, status IN_HOTEL/OUTGOING/RECEIVED)
+ *   2. Nearest future UPCOMING booking (checkIn > now)
+ *   3. Most recent historical booking (for display in dog profile)
+ * An old RECEIVED/COMPLETE booking is NEVER preferred over a newer UPCOMING booking.
  */
 export function pickRelevantBooking(bookings: any[], currentTime: Date = new Date()) {
   if (!bookings || bookings.length === 0) return null;
 
-  // 1. First priority: Active in-hotel, received, or outgoing booking
-  const active = bookings.find(
-    (b) => b.current_status === 'IN_HOTEL' || b.current_status === 'RECEIVED' || b.current_status === 'OUTGOING'
-  );
+  // 1. Currently active: checkIn <= now AND checkOut >= now AND active status
+  const active = bookings
+    .filter((b) => {
+      const cin = new Date(b.check_in_at);
+      const cout = new Date(b.check_out_at);
+      const activeStatuses = ['IN_HOTEL', 'OUTGOING', 'RECEIVED'];
+      return activeStatuses.includes(b.current_status) && cin <= currentTime && cout >= currentTime;
+    })
+    .sort((a, b) => new Date(b.check_in_at).getTime() - new Date(a.check_in_at).getTime())[0];
   if (active) return formatBookingResponse(active, currentTime);
 
-  // 2. Second priority: Upcoming booking
+  // 2. Nearest upcoming (checkIn strictly in the future)
   const upcoming = bookings
-    .filter((b) => b.current_status === 'UPCOMING' && new Date(b.check_out_at) > currentTime)
+    .filter((b) => b.current_status === 'UPCOMING' && new Date(b.check_in_at) > currentTime)
     .sort((a, b) => new Date(a.check_in_at).getTime() - new Date(b.check_in_at).getTime())[0];
   if (upcoming) return formatBookingResponse(upcoming, currentTime);
 
-  // 3. Third priority: Most recent historical stay
-  const recent = [...bookings].sort(
-    (a, b) => new Date(b.check_out_at).getTime() - new Date(a.check_out_at).getTime()
-  )[0];
+  // 3. Most recent historical stay (for display purposes only)
+  const recent = [...bookings]
+    .filter((b) => b.current_status !== 'CANCEL')
+    .sort((a, b) => new Date(b.check_out_at).getTime() - new Date(a.check_out_at).getTime())[0];
   if (recent) return formatBookingResponse(recent, currentTime);
 
   return null;
@@ -238,7 +248,14 @@ export function formatBookingResponse(b: any, currentTime: Date = new Date()) {
 export function formatDogResponse(dog: any, relevantBooking?: any) {
   const owner = dog.owner;
   const ownerPhone = owner?.display_phone || owner?.normalized_phone || '';
-  const booking = relevantBooking || pickRelevantBooking(dog.bookings || []);
+  const booking = relevantBooking !== undefined ? relevantBooking : pickRelevantBooking(dog.bookings || []);
+
+  // A dog with no booking has null status and null dates — NEVER fake defaults
+  const status = booking ? (booking.status || null) : null;
+  const checkInDate = booking ? (booking.checkInAt?.split('T')[0] || booking.check_in_at?.split('T')[0] || null) : null;
+  const checkOutDate = booking ? (booking.checkOutAt?.split('T')[0] || booking.check_out_at?.split('T')[0] || null) : null;
+  const checkInTime = booking ? (booking.checkInLocal?.timeFormatted || null) : null;
+  const checkOutTime = booking ? (booking.checkOutLocal?.timeFormatted || null) : null;
 
   return {
     id: dog.id,
@@ -274,8 +291,12 @@ export function formatDogResponse(dog: any, relevantBooking?: any) {
     ownerPhone,
     ownerEmail: owner?.email || '',
     currentBooking: booking,
-    currentStatus: booking ? booking.status : 'No active booking',
-    status: booking ? booking.status : 'RECEIVED'
+    currentStatus: status,   // null = no reservation
+    status,                  // null = no reservation (never defaults to RECEIVED)
+    checkInDate,             // null = no reservation
+    checkInTime,
+    checkOutDate,            // null = no reservation
+    checkOutTime
   };
 }
 
@@ -690,7 +711,9 @@ export const api = {
         throw new ApiError(500, 'DB_ERROR', error.message);
       }
 
-      return (data || []).map((b: any) => formatBookingResponse(b));
+      return (data || [])
+        .filter((b: any) => b.dog && !b.dog.is_archived)
+        .map((b: any) => formatBookingResponse(b));
     },
 
     async getBookingById(id: string) {
@@ -932,6 +955,26 @@ export const api = {
         throw new ApiError(404, 'BOOKING_NOT_FOUND', 'Booking not found');
       }
 
+      // Status lifecycle validation (Requirement 19)
+      const fromStatus = current.current_status;
+      const toStatus = status;
+      const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+        UPCOMING: ['RECEIVED', 'IN_HOTEL', 'CANCEL'],
+        RECEIVED: ['IN_HOTEL', 'CANCEL', 'OUTGOING', 'COMPLETE'],
+        IN_HOTEL: ['OUTGOING', 'COMPLETE', 'CANCEL'],
+        OUTGOING: ['COMPLETE', 'IN_HOTEL', 'CANCEL'],
+        COMPLETE: [],
+        CANCEL: []
+      };
+
+      if (fromStatus !== toStatus && ALLOWED_TRANSITIONS[fromStatus] && !ALLOWED_TRANSITIONS[fromStatus].includes(toStatus)) {
+        throw new ApiError(
+          400,
+          'INVALID_STATUS_TRANSITION',
+          `Cannot change status from "${fromStatus}" to "${toStatus}".`
+        );
+      }
+
       const patch: any = {
         current_status: status,
         updated_at: new Date().toISOString()
@@ -996,7 +1039,7 @@ export const api = {
     }
   },
 
-  // Dashboard Aggregates & Overdue Attention (Filtered to Relevant Dates Only)
+  // Dashboard Aggregates & Overdue Attention (All date-based, reservation-driven)
   dashboard: {
     async getDashboardMetrics() {
       const orgId = getCurrentOrganizationId();
@@ -1017,33 +1060,83 @@ export const api = {
 
       const allBookings = (bookingsData || []).map((b: any) => formatBookingResponse(b, now));
 
-      const countsMap: Record<string, number> = {
-        IN_HOTEL: 0,
-        UPCOMING: 0,
-        OUTGOING: 0,
-        COMPLETE: 0,
-        CANCEL: 0,
-        RECEIVED: 0
-      };
+      // Date-based counters — NOT status-based
+      let todayCheckIn = 0;      // bookings whose checkInDate === today (not cancelled)
+      let todayCheckOut = 0;     // bookings whose checkOutDate === today (not cancelled)
+      let inHotelCount = 0;      // active stays: checkIn <= now AND checkOut > now, not CANCEL/COMPLETE
+      let inHotelTodayAll = 0;   // all relevant bookings for today's hotel view
+      let upcomingCount = 0;     // future UPCOMING bookings (checkIn > now)
+      let outgoingCount = 0;     // OUTGOING status
+      let completeCount = 0;
+      let cancelCount = 0;
+      let receivedCount = 0;
 
-      let todayCheckIn = 0;
-      let todayCheckOut = 0;
       const overdueAttentionList: any[] = [];
       const todayCheckInOut: any[] = [];
+      const seenOverdueBookingIds = new Set<string>();
 
       for (const b of allBookings) {
-        if (b.status in countsMap) {
-          countsMap[b.status]++;
-        }
+        // Exclude bookings belonging to deleted or archived dogs (Requirement 18)
+        if (!b.dog || b.dog.is_archived) continue;
 
         const inDateStr = toDateString(b.checkInAt);
         const outDateStr = toDateString(b.checkOutAt);
+        const checkInTime = new Date(b.checkInAt);
+        const checkOutTime = new Date(b.checkOutAt);
+        const isCancelled = b.status === 'CANCEL';
+        const isComplete = b.status === 'COMPLETE';
+        const isFinal = isCancelled || isComplete;
 
-        if (inDateStr === todayStr) todayCheckIn++;
-        if (outDateStr === todayStr) todayCheckOut++;
+        // Status counts
+        if (b.status === 'OUTGOING') outgoingCount++;
+        if (b.status === 'COMPLETE') completeCount++;
+        if (b.status === 'CANCEL') cancelCount++;
+        if (b.status === 'RECEIVED') receivedCount++;
 
-        // Overdue check: IN_HOTEL or OUTGOING past checkout
-        if (b.attention?.requiresAttention) {
+        // Today check-in: booking arrives today (any non-cancelled status)
+        if (inDateStr === todayStr && !isCancelled) todayCheckIn++;
+
+        // Today check-out: booking leaves today (any non-cancelled status)
+        if (outDateStr === todayStr && !isCancelled) todayCheckOut++;
+
+        // Active in hotel: checkIn <= now AND checkOut > now AND not final
+        if (checkInTime <= now && checkOutTime > now && !isFinal) {
+          inHotelCount++;
+        }
+
+        // Upcoming: checkIn strictly in the future AND status is UPCOMING
+        if (b.status === 'UPCOMING' && checkInTime > now) {
+          upcomingCount++;
+        }
+
+        // Today hotel view: arriving today, leaving today, or currently active
+        const isTouchingToday = inDateStr === todayStr || outDateStr === todayStr;
+        const isActiveNow = checkInTime <= now && checkOutTime >= now && !isFinal;
+        if ((isTouchingToday || isActiveNow) && !isFinal) {
+          inHotelTodayAll++;
+          todayCheckInOut.push({
+            bookingId: b.id,
+            dogId: b.dogId,
+            dogName: b.dog?.name || 'Unknown',
+            dogAvatarId: b.dog?.avatar_id || 'avatar_1',
+            ownerName: b.dog?.owner?.name || 'Unknown Owner',
+            timeFormatted: b.checkInLocal.timeFormatted,
+            status: b.status,
+            durationLabel: b.duration.label,
+            attention: b.attention
+          });
+        }
+
+        // --- Overdue / Action Required logic ---
+        // Rule: now > checkOut AND not COMPLETE AND not CANCEL → Action Required
+        if (!isFinal && now > checkOutTime && !seenOverdueBookingIds.has(b.id)) {
+          seenOverdueBookingIds.add(b.id);
+          const overdueMinutes = Math.floor((now.getTime() - checkOutTime.getTime()) / (1000 * 60));
+          const attentionType = (b.status === 'OUTGOING' && b.isOutgoingConfirmed)
+            ? 'OVERDUE_UNRESOLVED'
+            : (b.status === 'OUTGOING' || b.status === 'IN_HOTEL')
+              ? 'OUTGOING_CONFIRMATION_REQUIRED'
+              : 'OVERDUE_UNRESOLVED';
           overdueAttentionList.push({
             bookingId: b.id,
             dogId: b.dogId,
@@ -1055,12 +1148,18 @@ export const api = {
             scheduledCheckOut: b.checkOutAt,
             scheduledCheckOutFormatted: `${b.checkOutLocal.dateFormatted} at ${b.checkOutLocal.timeFormatted}`,
             currentStatus: b.status,
-            attention: b.attention
+            attention: {
+              requiresAttention: true,
+              attentionType,
+              isOverdue: true,
+              overdueMinutes
+            }
           });
         }
 
-        // Overdue check: UPCOMING bookings whose check-in date has already passed (no-show / missed arrival)
-        if (b.status === 'UPCOMING' && new Date(b.checkInAt) < now) {
+        // Missed check-in: UPCOMING but checkIn time has passed
+        if (b.status === 'UPCOMING' && checkInTime < now && !seenOverdueBookingIds.has(b.id)) {
+          seenOverdueBookingIds.add(b.id);
           overdueAttentionList.push({
             bookingId: b.id,
             dogId: b.dogId,
@@ -1076,42 +1175,24 @@ export const api = {
               requiresAttention: true,
               attentionType: 'MISSED_CHECKIN' as const,
               isOverdue: true,
-              overdueMinutes: Math.floor((now.getTime() - new Date(b.checkInAt).getTime()) / (1000 * 60))
+              overdueMinutes: Math.floor((now.getTime() - checkInTime.getTime()) / (1000 * 60))
             }
-          });
-        }
-
-        // Relevant to Today only (arriving today, leaving today, or active in-hotel today)
-        // Strictly exclude historical completed/cancelled stays from before today
-        const isTouchingToday = inDateStr === todayStr || outDateStr === todayStr;
-        const isActiveInHotel = (b.status === 'IN_HOTEL' || b.status === 'OUTGOING') && inDateStr <= todayStr && outDateStr >= todayStr;
-
-        if ((isTouchingToday || isActiveInHotel) && b.status !== 'COMPLETE' && b.status !== 'CANCEL') {
-          todayCheckInOut.push({
-            bookingId: b.id,
-            dogId: b.dogId,
-            dogName: b.dog?.name || 'Unknown',
-            dogAvatarId: b.dog?.avatar_id || 'avatar_1',
-            ownerName: b.dog?.owner?.name || 'Unknown Owner',
-            timeFormatted: b.checkInLocal.timeFormatted,
-            status: b.status,
-            durationLabel: b.duration.label,
-            attention: b.attention
           });
         }
       }
 
       return {
         stats: {
-          totalDogs: totalDogs || 0,
-          inHotelCount: countsMap.IN_HOTEL,
-          upcomingCount: countsMap.UPCOMING,
-          outgoingCount: countsMap.OUTGOING,
-          completeCount: countsMap.COMPLETE,
-          cancelCount: countsMap.CANCEL,
-          receivedCount: countsMap.RECEIVED,
-          todayCheckIn,
-          todayCheckOut,
+          totalDogs: totalDogs || 0,   // COUNT of all active dog profiles (not reservation-based)
+          inHotelCount,                // date+status based active stays
+          inHotelTodayAll,
+          upcomingCount,               // future UPCOMING bookings
+          outgoingCount,
+          completeCount,
+          cancelCount,
+          receivedCount,
+          todayCheckIn,                // checkInDate === today
+          todayCheckOut,               // checkOutDate === today
           overdueAttentionCount: overdueAttentionList.length
         },
         overdueAttentionList,

@@ -291,11 +291,13 @@ export const BookingsPage: React.FC = () => {
                       Check-In
                     </span>
                     <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-                      {booking.checkInDate}
+                      {booking.checkInDate || '—'}
                     </span>
-                    <span style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)', display: 'block' }}>
-                      {booking.checkInTime || '10:00 AM'}
-                    </span>
+                    {booking.checkInTime && (
+                      <span style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)', display: 'block' }}>
+                        {booking.checkInTime}
+                      </span>
+                    )}
                   </div>
 
                   <div>
@@ -303,11 +305,13 @@ export const BookingsPage: React.FC = () => {
                       Check-Out
                     </span>
                     <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-                      {booking.checkOutDate}
+                      {booking.checkOutDate || '—'}
                     </span>
-                    <span style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)', display: 'block' }}>
-                      {booking.checkOutTime || '12:00 PM'}
-                    </span>
+                    {booking.checkOutTime && (
+                      <span style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)', display: 'block' }}>
+                        {booking.checkOutTime}
+                      </span>
+                    )}
                   </div>
                 </div>
 

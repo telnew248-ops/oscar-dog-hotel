@@ -107,34 +107,41 @@ function mapBackendDogToFrontend(d: any): Dog {
   const ownerName = d.owner?.name || d.owner_name || d.ownerName || 'Unknown Owner';
   const ownerPhone = d.owner?.phone || d.owner_phone || d.ownerPhone || '';
   const ownerEmail = d.owner?.email || d.owner_email || d.ownerEmail || '';
-  const status = (d.currentStatus && d.currentStatus !== 'No active booking'
-    ? d.currentStatus
-    : d.status || 'RECEIVED') as UniversalStatus;
+
+  // status is null when the dog has no reservation — NEVER default to 'RECEIVED'
+  const rawStatus = d.currentStatus || d.status;
+  const status = (rawStatus && rawStatus !== 'No active booking') ? rawStatus as UniversalStatus : null;
 
   const booking = d.currentBooking;
-  const checkInDate = booking?.checkInLocal?.dateFormatted || booking?.checkInAt?.split('T')[0] || d.checkInDate || 'Sep 12, 2026';
-  const checkInTime = booking?.checkInLocal?.timeFormatted || d.checkInTime || '10:00 AM';
-  const checkOutDate = booking?.checkOutLocal?.dateFormatted || booking?.checkOutAt?.split('T')[0] || d.checkOutDate || 'Sep 15, 2026';
-  const checkOutTime = booking?.checkOutLocal?.timeFormatted || d.checkOutTime || '12:00 PM';
+  // dates/times are null when there is no booking — NEVER use hardcoded fallback dates
+  const checkInDate = booking ? (booking.checkInLocal?.dateFormatted || booking.checkInAt?.split('T')[0] || d.checkInDate || null) : (d.checkInDate || null);
+  const checkInTime = booking ? (booking.checkInLocal?.timeFormatted || d.checkInTime || null) : (d.checkInTime || null);
+  const checkOutDate = booking ? (booking.checkOutLocal?.dateFormatted || booking.checkOutAt?.split('T')[0] || d.checkOutDate || null) : (d.checkOutDate || null);
+  const checkOutTime = booking ? (booking.checkOutLocal?.timeFormatted || d.checkOutTime || null) : (d.checkOutTime || null);
+
+  const dob = d.dateOfBirth || d.date_of_birth || d.dob;
+  const age = dob
+    ? `${Math.max(1, new Date().getFullYear() - new Date(dob).getFullYear())} yrs`
+    : (d.age || undefined);
 
   return {
     id: d.id,
     name: d.name,
     avatarId,
     breed: d.breed,
-    dob: d.dateOfBirth || d.date_of_birth || d.dob,
-    age: d.dateOfBirth ? `${Math.max(1, new Date().getFullYear() - new Date(d.dateOfBirth).getFullYear())} yrs` : (d.age || '2 yrs'),
-    gender: d.gender || 'Male',
+    dob,
+    age,
+    gender: d.gender || undefined,
     weightKg: d.weightKg !== undefined ? d.weightKg : (d.weight_kg ? parseFloat(d.weight_kg) : undefined),
     ownerName,
     ownerPhone,
     ownerEmail,
-    status,
+    status,       // null = no reservation
     notes: d.specialNotes || d.special_notes || d.notes,
-    checkInDate,
-    checkInTime,
-    checkOutDate,
-    checkOutTime,
+    checkInDate,  // null = no reservation
+    checkInTime,  // null = no reservation
+    checkOutDate, // null = no reservation
+    checkOutTime, // null = no reservation
     createdAt: d.createdAt || d.created_at || new Date().toISOString(),
     updatedAt: d.updatedAt || d.updated_at || new Date().toISOString()
   };
@@ -145,10 +152,10 @@ function mapBackendBookingToFrontend(b: any): Booking {
     id: b.id,
     dogId: b.dogId || b.dog_id,
     dog: b.dog ? mapBackendDogToFrontend(b.dog) : undefined,
-    checkInDate: b.checkInLocal?.dateFormatted || b.checkInAt?.split('T')[0] || b.check_in_at?.split('T')[0] || 'Sep 12, 2026',
-    checkInTime: b.checkInLocal?.timeFormatted || '10:00 AM',
-    checkOutDate: b.checkOutLocal?.dateFormatted || b.checkOutAt?.split('T')[0] || b.check_out_at?.split('T')[0] || 'Sep 15, 2026',
-    checkOutTime: b.checkOutLocal?.timeFormatted || '12:00 PM',
+    checkInDate: b.checkInLocal?.dateFormatted || b.checkInAt?.split('T')[0] || b.check_in_at?.split('T')[0] || '',
+    checkInTime: b.checkInLocal?.timeFormatted || '',
+    checkOutDate: b.checkOutLocal?.dateFormatted || b.checkOutAt?.split('T')[0] || b.check_out_at?.split('T')[0] || '',
+    checkOutTime: b.checkOutLocal?.timeFormatted || '',
     status: (b.currentStatus || b.current_status || b.status || 'UPCOMING') as UniversalStatus,
     services: Array.isArray(b.services) ? b.services : (typeof b.services === 'string' ? JSON.parse(b.services) : []),
     notes: b.notes,
@@ -159,10 +166,12 @@ function mapBackendBookingToFrontend(b: any): Booking {
 }
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [dogs, setDogs] = useState<Dog[]>(() => storageService.getDogs());
-  const [bookings, setBookings] = useState<Booking[]>(() => storageService.getBookings());
+  // Start clean — all live data comes from Supabase after login.
+  // Storage is only used as a read-through cache, never to seed demo data.
+  const [dogs, setDogs] = useState<Dog[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
   const [settings, setSettings] = useState<AccountSettings>(() => storageService.getSettings());
-  const [recentSearches, setRecentSearches] = useState<RecentSearch[]>(() => storageService.getRecentSearches());
+  const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
   const [overdueAttentionList, setOverdueAttentionList] = useState<OverdueAttentionDog[]>([]);
 
   const [sessionAccount, setSessionAccount] = useState<UserSessionAccount | null>(null);
@@ -512,11 +521,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteDog = async (id: string) => {
     try {
+      const dogToDelete = dogs.find((d) => d.id === id);
       await api.dogs.deleteDog(id);
-      // Immediately cascade remove from all app state, alerts, and cached storage (Requirement 5)
+      // Immediately cascade remove from all app state, alerts, recent searches, and cached storage (Requirements 5 & 22)
       setDogs((prev) => prev.filter((d) => d.id !== id));
       setBookings((prev) => prev.filter((b) => b.dogId !== id));
       setOverdueAttentionList((prev) => prev.filter((o) => o.dogId !== id));
+      if (dogToDelete) {
+        setRecentSearches((prev) => prev.filter((s) => s.query.toLowerCase() !== dogToDelete.name.toLowerCase()));
+      }
       storageService.saveDogs(storageService.getDogs().filter((d) => d.id !== id));
       storageService.saveBookings(storageService.getBookings().filter((b) => b.dogId !== id));
 
@@ -655,44 +668,72 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const getDogById = (id: string) => dogs.find((d) => d.id === id);
   const getBookingById = (id: string) => bookings.find((b) => b.id === id);
 
-  // Dynamic real-time statistics
+  // Dynamic real-time statistics — ALL calculated from actual booking records and dates
   const stats = useMemo(() => {
-    const inHotel = dogs.filter((d) => d.status === 'IN_HOTEL').length;
-    const received = dogs.filter((d) => d.status === 'RECEIVED').length;
-    const upcoming = dogs.filter((d) => d.status === 'UPCOMING').length;
-    const complete = dogs.filter((d) => d.status === 'COMPLETE').length;
-    const cancel = dogs.filter((d) => d.status === 'CANCEL').length;
-    const outgoing = dogs.filter((d) => d.status === 'OUTGOING').length;
+    const now = new Date();
+    const todayStr = getTodayDateString();
 
-    const checkInToday = dogs.filter(
-      (d) => d.status === 'RECEIVED' || d.status === 'IN_HOTEL'
-    ).length;
-    const checkOutToday = dogs.filter((d) => d.status === 'OUTGOING').length;
+    // totalDogs = ALL active (non-archived) dog profiles — independent of reservation status
+    const totalDogsCount = dogs.length;
 
-    // Total dogs strictly counts dogs currently present: IN_HOTEL + OUTGOING
-    const activeTotalDogs = inHotel + outgoing;
+    // All reservation calculations use the bookings array
+    let inHotelCount = 0;         // active stays: checkIn <= now < checkOut AND not CANCEL/COMPLETE
+    let inHotelTodayAllCount = 0; // relevant to today: arriving, leaving, or currently active
+    let upcomingCount = 0;        // future UPCOMING: checkIn > now
+    let outgoingCount = 0;        // OUTGOING status bookings
+    let completeCount = 0;
+    let cancelCount = 0;
+    let receivedCount = 0;
+    let todayCheckIn = 0;         // bookings arriving today (checkInDate === today, not cancelled)
+    let todayCheckOut = 0;        // bookings leaving today (checkOutDate === today, not cancelled)
 
-    // In Hotel showing all statuses for today (Requirement 2)
-    const todayDateStr = getTodayDateString();
-    const inHotelTodayAll = dogs.filter((d) => {
-      if (d.status === 'IN_HOTEL') return true;
-      return d.checkInDate === todayDateStr || d.checkOutDate === todayDateStr || d.status === 'RECEIVED' || d.status === 'OUTGOING';
-    }).length;
+    for (const b of bookings) {
+      const isCancelled = b.status === 'CANCEL';
+      const isComplete = b.status === 'COMPLETE';
+      const isFinal = isCancelled || isComplete;
+
+      if (b.status === 'OUTGOING') outgoingCount++;
+      if (b.status === 'COMPLETE') completeCount++;
+      if (b.status === 'CANCEL') cancelCount++;
+      if (b.status === 'RECEIVED') receivedCount++;
+
+      const checkInDate = b.checkInDate;  // YYYY-MM-DD or formatted string
+      const checkOutDate = b.checkOutDate;
+
+      // Parse the dates. checkInDate/checkOutDate may be formatted (e.g. "Sep 12, 2026") or ISO.
+      const cinMs = checkInDate ? new Date(checkInDate).getTime() : NaN;
+      const coutMs = checkOutDate ? new Date(checkOutDate).getTime() : NaN;
+
+      if (!isCancelled && checkInDate === todayStr) todayCheckIn++;
+      if (!isCancelled && checkOutDate === todayStr) todayCheckOut++;
+
+      if (!isFinal && !isNaN(cinMs) && !isNaN(coutMs)) {
+        const cinTime = new Date(cinMs);
+        const coutTime = new Date(coutMs);
+        if (cinTime <= now && coutTime > now) inHotelCount++;
+        if (b.status === 'UPCOMING' && cinTime > now) upcomingCount++;
+
+        const isTodayArrival = checkInDate === todayStr;
+        const isTodayDeparture = checkOutDate === todayStr;
+        const isActiveNow = cinTime <= now && coutTime >= now;
+        if (isTodayArrival || isTodayDeparture || isActiveNow) inHotelTodayAllCount++;
+      }
+    }
 
     return {
-      totalDogs: activeTotalDogs,
-      inHotelCount: inHotel,
-      inHotelTodayAllCount: inHotelTodayAll,
-      todayCheckIn: checkInToday,
-      todayCheckOut: checkOutToday,
-      upcomingCount: upcoming,
-      completeCount: complete,
-      cancelCount: cancel,
-      outgoingCount: outgoing,
-      receivedCount: received,
+      totalDogs: totalDogsCount,
+      inHotelCount,
+      inHotelTodayAllCount,
+      todayCheckIn,
+      todayCheckOut,
+      upcomingCount,
+      completeCount,
+      cancelCount,
+      outgoingCount,
+      receivedCount,
       overdueAttentionCount: overdueAttentionList.length
     };
-  }, [dogs, overdueAttentionList]);
+  }, [dogs, bookings, overdueAttentionList]);
 
   return (
     <AppContext.Provider

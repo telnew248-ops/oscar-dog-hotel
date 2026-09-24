@@ -26,8 +26,8 @@ export const SplashScreen: React.FC = () => {
           src="/assets/new_logo.png"
           alt="Oscar Dog Hotel"
           style={{
-            width: '195px',
-            height: '195px',
+            width: '215px',
+            height: '215px',
             objectFit: 'contain',
             filter: 'drop-shadow(0 8px 24px rgba(18, 103, 223, 0.2))'
           }}

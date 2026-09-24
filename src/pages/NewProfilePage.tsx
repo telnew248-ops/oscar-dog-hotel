@@ -45,7 +45,6 @@ export const NewProfilePage: React.FC = () => {
     if (!validateForm()) return;
 
     setIsSubmitting(true);
-    const todayStr = new Date().toISOString().split('T')[0];
 
     try {
       const newDog = await addDog({
@@ -53,18 +52,18 @@ export const NewProfilePage: React.FC = () => {
         avatarId: selectedAvatarId,
         breed: breed.trim(),
         dob: dob || undefined,
-        age: dob ? '1 yr' : '2 yrs',
+        age: dob ? '1 yr' : undefined,
         gender,
         weightKg: weight ? parseFloat(weight) : undefined,
         ownerName: ownerName.trim(),
         ownerPhone: ownerPhone.trim(),
         ownerEmail: ownerEmail.trim() || undefined,
-        status: 'RECEIVED',
+        status: null,
         notes: notes.trim() || undefined,
-        checkInDate: todayStr,
-        checkInTime: '10:00 AM',
-        checkOutDate: todayStr,
-        checkOutTime: '12:00 PM'
+        checkInDate: null,
+        checkInTime: null,
+        checkOutDate: null,
+        checkOutTime: null
       }, confirmExistingOwnerId);
 
       setPhoneConflict(null);

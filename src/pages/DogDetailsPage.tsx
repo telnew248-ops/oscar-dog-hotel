@@ -13,7 +13,8 @@ import {
   Info,
   Edit3,
   Check,
-  Trash2
+  Trash2,
+  Plus
 } from 'lucide-react';
 
 export const DogDetailsPage: React.FC = () => {
@@ -24,6 +25,7 @@ export const DogDetailsPage: React.FC = () => {
     updateDogStatus,
     deleteDog,
     goBack,
+    navigate,
     bookings,
     extendBooking,
     confirmOutgoing,
@@ -46,7 +48,7 @@ export const DogDetailsPage: React.FC = () => {
   const [editOwnerName, setEditOwnerName] = useState(dog?.ownerName || '');
   const [editOwnerPhone, setEditOwnerPhone] = useState(dog?.ownerPhone || '');
   const [editOwnerEmail, setEditOwnerEmail] = useState(dog?.ownerEmail || '');
-  const [currentStatus, setCurrentStatus] = useState<UniversalStatus>(dog?.status || 'IN_HOTEL');
+  const [currentStatus, setCurrentStatus] = useState<UniversalStatus | null>(dog?.status || null);
 
   if (!dog) {
     return (
@@ -191,34 +193,60 @@ export const DogDetailsPage: React.FC = () => {
 
       {/* Booking Information Card */}
       <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Calendar size={18} color="var(--color-primary)" />
-          <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
-            Booking Information
-          </h3>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Calendar size={18} color="var(--color-primary)" />
+            <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+              Booking Information
+            </h3>
+          </div>
+          {dog.checkInDate && (
+            <StatusBadge status={dog.status} size="sm" />
+          )}
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', background: '#f7fbff', padding: '12px', borderRadius: '12px' }}>
           <div>
             <p style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)', marginBottom: '2px' }}>Check-In</p>
             <p style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-              {dog.checkInDate}
+              {dog.checkInDate || '—'}
             </p>
-            <p style={{ fontSize: '0.76rem', color: 'var(--color-text-secondary)' }}>
-              {dog.checkInTime || '10:15 AM'}
-            </p>
+            {dog.checkInTime && (
+              <p style={{ fontSize: '0.76rem', color: 'var(--color-text-secondary)' }}>
+                {dog.checkInTime}
+              </p>
+            )}
           </div>
 
           <div>
             <p style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)', marginBottom: '2px' }}>Check-Out</p>
             <p style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-              {dog.checkOutDate}
+              {dog.checkOutDate || '—'}
             </p>
-            <p style={{ fontSize: '0.76rem', color: 'var(--color-text-secondary)' }}>
-              {dog.checkOutTime || '10:00 AM'}
-            </p>
+            {dog.checkOutTime && (
+              <p style={{ fontSize: '0.76rem', color: 'var(--color-text-secondary)' }}>
+                {dog.checkOutTime}
+              </p>
+            )}
           </div>
         </div>
+
+        {!dog.checkInDate && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
+            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+              This dog profile has no active reservation.
+            </p>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => navigate('/bookings/new', dog.id)}
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '0.85rem', padding: '9px 14px' }}
+            >
+              <Plus size={16} strokeWidth={2.5} />
+              <span>Create Reservation</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Owner Information Card */}
@@ -278,22 +306,24 @@ export const DogDetailsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Booking Status Management Panel */}
-      <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        <div>
-          <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
-            Booking Status
-          </h3>
-          <p style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
-            Update the current status for this booking across all screens
-          </p>
-        </div>
+      {/* Booking Status Management Panel — Only shown if an active reservation exists */}
+      {activeBooking && (
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div>
+            <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+              Booking Status
+            </h3>
+            <p style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+              Update the current status for this booking across all screens
+            </p>
+          </div>
 
-        <StatusSelector
-          currentStatus={dog.status}
-          onSelect={handleStatusChange}
-        />
-      </div>
+          <StatusSelector
+            currentStatus={dog.status || 'UPCOMING'}
+            onSelect={handleStatusChange}
+          />
+        </div>
+      )}
 
       {/* Operational Stay Actions */}
       {activeBooking && (

@@ -7,7 +7,7 @@ import { matchDogSearch } from '../utils/search';
 import { getTodayDateString, formatDisplayDate } from '../utils/date';
 
 export const DashboardPage: React.FC = () => {
-  const { dogs, stats, navigate, setFilterState, overdueAttentionList } = useApp();
+  const { dogs, bookings, stats, navigate, setFilterState, overdueAttentionList } = useApp();
   const [localSearch, setLocalSearch] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
@@ -49,37 +49,52 @@ export const DashboardPage: React.FC = () => {
 
   const todayStr = useMemo(() => getTodayDateString(), []);
 
-  // Today's relevant dogs: Outgoing, Complete, Received, Upcoming, or Cancelled (Requirement 2)
-  const todayDogs = useMemo(() => {
-    return dogs.filter((d) => {
-      const allowedTodayStatuses = ['OUTGOING', 'COMPLETE', 'RECEIVED', 'UPCOMING', 'CANCEL'];
-      if (!allowedTodayStatuses.includes(d.status)) return false;
+  // Today's activities derived strictly from actual reservations relevant to today (Requirement 8)
+  const todayActivities = useMemo(() => {
+    const now = new Date();
+    return bookings
+      .filter((b) => {
+        if (b.status === 'CANCEL') return false;
 
-      // Exclude past completed or cancelled bookings
-      if ((d.status === 'COMPLETE' || d.status === 'CANCEL') && d.checkOutDate && d.checkOutDate < todayStr) {
-        return false;
-      }
-      // Exclude future upcoming bookings beyond today
-      if (d.status === 'UPCOMING' && d.checkInDate && d.checkInDate > todayStr) {
-        return false;
-      }
-      // Exclude past UPCOMING (missed check-in) — they appear in Action Required instead
-      if (d.status === 'UPCOMING' && d.checkInDate && d.checkInDate < todayStr) {
-        return false;
-      }
+        const isArrivalToday = b.checkInDate === todayStr;
+        const isDepartureToday = b.checkOutDate === todayStr;
 
-      return true;
-    });
-  }, [dogs, todayStr]);
+        const cin = new Date(b.checkInDate).getTime();
+        const cout = new Date(b.checkOutDate).getTime();
+        const isActiveStay = !isNaN(cin) && !isNaN(cout) && cin <= now.getTime() && cout >= now.getTime() && b.status !== 'COMPLETE';
 
-  // Upcoming dogs starting strictly after today (future dates only)
-  const upcomingDogs = useMemo(() => {
-    return dogs.filter((d) => {
-      if (d.status !== 'UPCOMING') return false;
-      // Only show if check-in date is in the future (strictly after today)
-      return d.checkInDate && d.checkInDate > todayStr;
-    });
-  }, [dogs, todayStr]);
+        return isArrivalToday || isDepartureToday || isActiveStay;
+      })
+      .map((b) => {
+        const dog = dogs.find((d) => d.id === b.dogId) || b.dog;
+        return {
+          booking: b,
+          dog
+        };
+      })
+      .filter((item): item is { booking: typeof bookings[0]; dog: typeof dogs[0] } => Boolean(item.dog && !item.dog.isArchived));
+  }, [bookings, dogs, todayStr]);
+
+  // Upcoming reservations derived strictly from future reservations (Requirement 12)
+  const upcomingReservations = useMemo(() => {
+    const now = new Date();
+    return bookings
+      .filter((b) => {
+        if (b.status !== 'UPCOMING') return false;
+        // Strictly future reservations starting after today
+        const cin = new Date(b.checkInDate).getTime();
+        return b.checkInDate > todayStr || (!isNaN(cin) && cin > now.getTime());
+      })
+      .sort((a, b) => new Date(a.checkInDate).getTime() - new Date(b.checkInDate).getTime())
+      .map((b) => {
+        const dog = dogs.find((d) => d.id === b.dogId) || b.dog;
+        return {
+          booking: b,
+          dog
+        };
+      })
+      .filter((item): item is { booking: typeof bookings[0]; dog: typeof dogs[0] } => Boolean(item.dog && !item.dog.isArchived));
+  }, [bookings, dogs, todayStr]);
 
   return (
     <div className="dashboard-page" style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -687,7 +702,7 @@ export const DashboardPage: React.FC = () => {
         </div>
 
         {/* Dog rows or empty state */}
-        {todayDogs.length === 0 ? (
+        {todayActivities.length === 0 ? (
           <div className="card" style={{ padding: '24px 16px', textAlign: 'center', backgroundColor: '#ffffff' }}>
             <p style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
               No check-ins, departures, or active stays today
@@ -698,9 +713,9 @@ export const DashboardPage: React.FC = () => {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {todayDogs.map((dog) => (
+            {todayActivities.map(({ dog, booking }) => (
               <div
-                key={dog.id}
+                key={booking.id}
                 className="card"
                 onClick={() => navigate(`/dogs/${dog.id}`)}
                 style={{
@@ -750,9 +765,9 @@ export const DashboardPage: React.FC = () => {
                       fontWeight: 500
                     }}
                   >
-                    {dog.checkInTime || '10:15 AM'}
+                    {booking.checkInTime || (booking.checkInDate === todayStr ? 'Today' : booking.checkInDate)}
                   </span>
-                  <StatusBadge status={dog.status} size="sm" />
+                  <StatusBadge status={booking.status} size="sm" />
                 </div>
               </div>
             ))}
@@ -761,7 +776,7 @@ export const DashboardPage: React.FC = () => {
       </div>
 
       {/* Upcoming Reservations (Starting after today) */}
-      {upcomingDogs.length > 0 && (
+      {upcomingReservations.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div
             style={{
@@ -799,9 +814,9 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {upcomingDogs.slice(0, 5).map((dog) => (
+            {upcomingReservations.slice(0, 5).map(({ dog, booking }) => (
               <div
-                key={dog.id}
+                key={booking.id}
                 className="card"
                 onClick={() => navigate(`/dogs/${dog.id}`)}
                 style={{
@@ -851,9 +866,9 @@ export const DashboardPage: React.FC = () => {
                       fontWeight: 700
                     }}
                   >
-                    Starts {formatDisplayDate(dog.checkInDate || '')}
+                    Starts {formatDisplayDate(booking.checkInDate || '')}
                   </span>
-                  <StatusBadge status={dog.status} size="sm" />
+                  <StatusBadge status={booking.status} size="sm" />
                 </div>
               </div>
             ))}

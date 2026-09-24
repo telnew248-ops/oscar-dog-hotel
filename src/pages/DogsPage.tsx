@@ -419,19 +419,23 @@ export const DogsPage: React.FC = () => {
                     color: 'var(--color-text-secondary)'
                   }}
                 >
-                  <span style={{ background: '#edf2fa', padding: '2px 7px', borderRadius: '4px' }}>
-                    {dog.age || '2 yrs'}
-                  </span>
-                  <span style={{ background: '#edf2fa', padding: '2px 7px', borderRadius: '4px' }}>
-                    {dog.gender === 'Female' ? '♀ Female' : '♂ Male'}
-                  </span>
+                  {dog.age && (
+                    <span style={{ background: '#edf2fa', padding: '2px 7px', borderRadius: '4px' }}>
+                      {dog.age}
+                    </span>
+                  )}
+                  {dog.gender && (
+                    <span style={{ background: '#edf2fa', padding: '2px 7px', borderRadius: '4px' }}>
+                      {dog.gender === 'Female' ? '♀ Female' : dog.gender === 'Male' ? '♂ Male' : dog.gender}
+                    </span>
+                  )}
                   {dog.weightKg && (
                     <span style={{ background: '#edf2fa', padding: '2px 7px', borderRadius: '4px' }}>
                       {dog.weightKg} kg
                     </span>
                   )}
                   <span style={{ marginLeft: 'auto', fontSize: '0.74rem', color: '#8a96ad' }}>
-                    {dog.checkInTime ? `Checked in ${dog.checkInTime}` : 'Today'}
+                    {dog.status && dog.checkInDate ? (dog.checkInTime ? `Checked in ${dog.checkInTime}` : dog.checkInDate) : 'No reservation'}
                   </span>
                 </div>
               </div>

@@ -41,14 +41,18 @@ export interface Dog {
   ownerName: string;
   ownerPhone: string;
   ownerEmail?: string;
-  status: UniversalStatus;
+  // Reservation fields — null when no reservation exists.
+  // A dog profile NEVER gets fake default values for these fields.
+  status?: UniversalStatus | null;
   notes?: string;
-  checkInDate: string; // YYYY-MM-DD or readable
-  checkInTime?: string;
-  checkOutDate: string; // YYYY-MM-DD or readable
-  checkOutTime?: string;
+  checkInDate?: string | null;   // YYYY-MM-DD, null when no reservation
+  checkInTime?: string | null;
+  checkOutDate?: string | null;  // YYYY-MM-DD, null when no reservation
+  checkOutTime?: string | null;
   createdAt: string;
   updatedAt: string;
+  isArchived?: boolean;
+  currentBooking?: any;
 }
 
 export interface BookingService {
@@ -117,7 +121,7 @@ export interface OverdueAttentionDog {
   currentStatus: UniversalStatus;
   attention: {
     requiresAttention: boolean;
-    attentionType: 'NONE' | 'OUTGOING_CONFIRMATION_REQUIRED' | 'OVERDUE_UNRESOLVED';
+    attentionType: 'NONE' | 'OUTGOING_CONFIRMATION_REQUIRED' | 'OVERDUE_UNRESOLVED' | 'MISSED_CHECKIN';
     isOverdue: boolean;
     overdueMinutes: number;
   };
