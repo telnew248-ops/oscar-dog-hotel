@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Dog,
   Booking,
@@ -13,7 +13,8 @@ import {
 import { storageService } from '../services/storage';
 import { api, ApiError, UserSessionAccount } from '../services/api';
 import { supabase } from '../services/supabase';
-import { getTodayDateString } from '../utils/date';
+import { getTodayDateString, toDateString, combineDateAndTime, formatTimeFromDate } from '../utils/date';
+import { App as CapApp } from '@capacitor/app';
 
 export type DeviceWidthMode = 'responsive' | 320 | 360 | 375 | 390 | 412 | 430 | 709;
 
@@ -54,6 +55,8 @@ interface AppContextType {
 
   addBooking: (bookingData: Omit<Booking, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Booking>;
   updateBookingStatus: (id: string, newStatus: UniversalStatus, effectiveAt?: string, notes?: string) => Promise<void>;
+  rescheduleCheckIn: (id: string, newCheckInAt: string, notes?: string) => Promise<void>;
+  rescheduleCheckOut: (id: string, newCheckOutAt: string, notes?: string) => Promise<void>;
   extendBooking: (id: string, newCheckOutAt: string, notes?: string) => Promise<void>;
   confirmOutgoing: (id: string) => Promise<void>;
 
@@ -148,14 +151,16 @@ function mapBackendDogToFrontend(d: any): Dog {
 }
 
 function mapBackendBookingToFrontend(b: any): Booking {
+  const checkInDate = toDateString(b.check_in_at || b.checkInAt);
+  const checkOutDate = toDateString(b.check_out_at || b.checkOutAt);
   return {
     id: b.id,
     dogId: b.dogId || b.dog_id,
     dog: b.dog ? mapBackendDogToFrontend(b.dog) : undefined,
-    checkInDate: b.checkInLocal?.dateFormatted || b.checkInAt?.split('T')[0] || b.check_in_at?.split('T')[0] || '',
-    checkInTime: b.checkInLocal?.timeFormatted || '',
-    checkOutDate: b.checkOutLocal?.dateFormatted || b.checkOutAt?.split('T')[0] || b.check_out_at?.split('T')[0] || '',
-    checkOutTime: b.checkOutLocal?.timeFormatted || '',
+    checkInDate,
+    checkInTime: b.checkInLocal?.timeFormatted || (b.check_in_at ? formatTimeFromDate(b.check_in_at) : '') || '10:00 AM',
+    checkOutDate,
+    checkOutTime: b.checkOutLocal?.timeFormatted || (b.check_out_at ? formatTimeFromDate(b.check_out_at) : '') || '10:00 AM',
     status: (b.currentStatus || b.current_status || b.status || 'UPCOMING') as UniversalStatus,
     services: Array.isArray(b.services) ? b.services : (typeof b.services === 'string' ? JSON.parse(b.services) : []),
     notes: b.notes,
@@ -395,11 +400,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const navigate = useCallback((route: string, dogId?: string) => {
     let finalRoute = route;
     if (dogId) {
-      finalRoute = `/dogs/${dogId}`;
-      setSelectedDogId(dogId);
+      if (route === '/bookings/new') {
+        finalRoute = '/bookings/new';
+        setSelectedDogId(dogId);
+      } else {
+        finalRoute = `/dogs/${dogId}`;
+        setSelectedDogId(dogId);
+      }
     } else if (route.startsWith('/dogs/') && route !== '/dogs/new') {
       setSelectedDogId(route.replace('/dogs/', ''));
-    } else {
+    } else if (route !== '/bookings/new') {
       setSelectedDogId(null);
     }
 
@@ -425,11 +435,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       window.location.hash = prev;
       if (prev.startsWith('/dogs/') && prev !== '/dogs/new') {
         setSelectedDogId(prev.replace('/dogs/', ''));
+      } else if (prev !== '/bookings/new') {
+        setSelectedDogId(null);
       }
     } else {
       navigate('/dashboard');
     }
   }, [historyStack, navigate]);
+
+  // Keep refs for Capacitor hardware back button handler
+  const historyStackRef = useRef(historyStack);
+  historyStackRef.current = historyStack;
+  const currentRouteRef = useRef(currentRoute);
+  currentRouteRef.current = currentRoute;
+
+  // Requirement 22: Native Android hardware back button handler
+  useEffect(() => {
+    let listenerHandle: any = null;
+    CapApp.addListener('backButton', () => {
+      const stack = historyStackRef.current;
+      const route = currentRouteRef.current;
+      if (stack.length <= 1 || route === '/dashboard') {
+        CapApp.exitApp();
+      } else {
+        goBack();
+      }
+    }).then((handle) => {
+      listenerHandle = handle;
+    }).catch(() => {
+      // In web browser where Capacitor App plugin is inactive
+    });
+
+    return () => {
+      if (listenerHandle && listenerHandle.remove) {
+        listenerHandle.remove();
+      }
+    };
+  }, [goBack]);
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -567,10 +609,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     bookingData: Omit<Booking, 'id' | 'createdAt' | 'updatedAt'>
   ): Promise<Booking> => {
     try {
+      const checkInIso = combineDateAndTime(bookingData.checkInDate, bookingData.checkInTime);
+      const checkOutIso = combineDateAndTime(bookingData.checkOutDate, bookingData.checkOutTime);
+
       const createdBackendBooking = await api.bookings.createBooking({
         dogId: bookingData.dogId,
-        checkInAt: new Date(bookingData.checkInDate).toISOString(),
-        checkOutAt: new Date(bookingData.checkOutDate).toISOString(),
+        checkInAt: checkInIso,
+        checkOutAt: checkOutIso,
         status: bookingData.status,
         services: bookingData.services,
         notes: bookingData.notes
@@ -602,6 +647,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await refreshData();
     } catch (err: any) {
       showToast(err.message || 'Failed to update booking status', 'error');
+      throw err;
+    }
+  };
+
+  const rescheduleCheckIn = async (id: string, newCheckInAt: string, notes?: string) => {
+    try {
+      await api.bookings.rescheduleCheckIn(id, newCheckInAt, notes);
+      showToast('Check-in rescheduled successfully!', 'success');
+      await refreshData();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to reschedule check-in', 'error');
+      throw err;
+    }
+  };
+
+  const rescheduleCheckOut = async (id: string, newCheckOutAt: string, notes?: string) => {
+    try {
+      await api.bookings.rescheduleCheckOut(id, newCheckOutAt, notes);
+      showToast('Check-out rescheduled successfully!', 'success');
+      await refreshData();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to reschedule check-out', 'error');
       throw err;
     }
   };
@@ -763,6 +830,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         restoreDog,
         addBooking,
         updateBookingStatus,
+        rescheduleCheckIn,
+        rescheduleCheckOut,
         extendBooking,
         confirmOutgoing,
         updateSettings,

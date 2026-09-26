@@ -54,14 +54,20 @@ export const DashboardPage: React.FC = () => {
     const now = new Date();
     return bookings
       .filter((b) => {
-        if (b.status === 'CANCEL') return false;
+        if (b.status === 'CANCEL' || b.status === 'COMPLETE') return false;
 
         const isArrivalToday = b.checkInDate === todayStr;
         const isDepartureToday = b.checkOutDate === todayStr;
 
+        // If status is UPCOMING and checkInDate !== todayStr, this is a missed check-in or future check-in
+        // Requirement 3 & 5: Missed check-ins from previous days must NOT appear as today's activity
+        if (b.status === 'UPCOMING' && b.checkInDate !== todayStr) {
+          return false;
+        }
+
         const cin = new Date(b.checkInDate).getTime();
         const cout = new Date(b.checkOutDate).getTime();
-        const isActiveStay = !isNaN(cin) && !isNaN(cout) && cin <= now.getTime() && cout >= now.getTime() && b.status !== 'COMPLETE';
+        const isActiveStay = !isNaN(cin) && !isNaN(cout) && cin <= now.getTime() && cout >= now.getTime() && b.status !== 'UPCOMING';
 
         return isArrivalToday || isDepartureToday || isActiveStay;
       })
@@ -75,15 +81,13 @@ export const DashboardPage: React.FC = () => {
       .filter((item): item is { booking: typeof bookings[0]; dog: typeof dogs[0] } => Boolean(item.dog && !item.dog.isArchived));
   }, [bookings, dogs, todayStr]);
 
-  // Upcoming reservations derived strictly from future reservations (Requirement 12)
+  // Upcoming reservations derived strictly from genuinely future reservations (Requirement 4)
   const upcomingReservations = useMemo(() => {
-    const now = new Date();
     return bookings
       .filter((b) => {
         if (b.status !== 'UPCOMING') return false;
-        // Strictly future reservations starting after today
-        const cin = new Date(b.checkInDate).getTime();
-        return b.checkInDate > todayStr || (!isNaN(cin) && cin > now.getTime());
+        // Strictly future reservations starting after today (never missed check-ins or past dates)
+        return b.checkInDate > todayStr;
       })
       .sort((a, b) => new Date(a.checkInDate).getTime() - new Date(b.checkInDate).getTime())
       .map((b) => {
@@ -617,52 +621,70 @@ export const DashboardPage: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <AlertTriangle size={20} color="#df2145" />
             <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#df2145' }}>
-              Action Required: Overdue Departures ({overdueAttentionList.length})
+              Action Required ({overdueAttentionList.length})
             </h3>
           </div>
           <p style={{ fontSize: '0.82rem', color: '#851d2f' }}>
-            The following dogs have passed their scheduled checkout time without departure confirmation:
+            The following dogs have missed check-ins or overdue departures requiring attention:
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {overdueAttentionList.map((item) => (
-              <div
-                key={item.bookingId}
-                onClick={() => navigate(`/dogs/${item.dogId}`)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  backgroundColor: '#ffffff',
-                  padding: '10px 12px',
-                  borderRadius: '10px',
-                  border: '1px solid #fed7dd',
-                  cursor: 'pointer'
-                }}
-              >
-                <DogAvatar avatarId={item.dogAvatarId} size="md" />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <h4 style={{ fontSize: '0.92rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
-                      {item.dogName}
-                    </h4>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)' }}>
-                      • {item.dogBreed}
-                    </span>
-                  </div>
-                  <p style={{ fontSize: '0.78rem', color: '#df2145', fontWeight: 600 }}>
-                    Scheduled: {item.scheduledCheckOutFormatted || 'Passed'} ({item.attention?.overdueMinutes || 0}m overdue)
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  style={{ fontSize: '0.75rem', padding: '6px 10px', whiteSpace: 'nowrap' }}
+            {overdueAttentionList.map((item) => {
+              const title = item.alertTitle || (item.attention?.attentionType === 'MISSED_CHECKIN' ? 'Check-in overdue' : 'Checkout overdue');
+              const eventDateStr = item.scheduledEventDateFormatted || item.scheduledCheckOutFormatted || 'Passed';
+              return (
+                <div
+                  key={item.bookingId}
+                  onClick={() => navigate(`/dogs/${item.dogId}`)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    backgroundColor: '#ffffff',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    border: '1px solid #fed7dd',
+                    cursor: 'pointer'
+                  }}
                 >
-                  Manage Stay
-                </button>
-              </div>
-            ))}
+                  <DogAvatar avatarId={item.dogAvatarId} size="lg" />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <h4 style={{ fontSize: '0.94rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+                        {item.dogName}
+                      </h4>
+                      <span style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)' }}>
+                        • {item.dogBreed}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          color: '#ffffff',
+                          backgroundColor: '#df2145',
+                          padding: '2px 7px',
+                          borderRadius: '4px'
+                        }}
+                      >
+                        {title}
+                      </span>
+                      <span style={{ fontSize: '0.76rem', color: '#851d2f', fontWeight: 600 }}>
+                        Scheduled: {eventDateStr} ({item.attention?.overdueMinutes || 0}m overdue)
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '6px 10px', whiteSpace: 'nowrap' }}
+                  >
+                    View Details
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -727,8 +749,8 @@ export const DashboardPage: React.FC = () => {
                   transition: 'transform 0.15s ease, box-shadow 0.15s ease'
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <DogAvatar avatarId={dog.avatarId} size="md" />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <DogAvatar avatarId={dog.avatarId} size="lg" />
                   <div>
                     <h4
                       style={{
@@ -828,8 +850,8 @@ export const DashboardPage: React.FC = () => {
                   transition: 'transform 0.15s ease, box-shadow 0.15s ease'
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <DogAvatar avatarId={dog.avatarId} size="md" />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <DogAvatar avatarId={dog.avatarId} size="lg" />
                   <div>
                     <h4
                       style={{

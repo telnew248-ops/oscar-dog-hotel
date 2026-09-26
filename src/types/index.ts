@@ -116,12 +116,16 @@ export interface OverdueAttentionDog {
   dogAvatarId: UniversalAvatarId;
   ownerName: string;
   ownerPhone: string;
+  alertTitle?: string;
+  alertType?: 'MISSED_CHECKIN' | 'OVERDUE_CHECKOUT';
+  scheduledEventDate?: string;
+  scheduledEventDateFormatted?: string;
   scheduledCheckOut: string;
   scheduledCheckOutFormatted: string;
   currentStatus: UniversalStatus;
   attention: {
     requiresAttention: boolean;
-    attentionType: 'NONE' | 'OUTGOING_CONFIRMATION_REQUIRED' | 'OVERDUE_UNRESOLVED' | 'MISSED_CHECKIN';
+    attentionType: 'NONE' | 'OUTGOING_CONFIRMATION_REQUIRED' | 'OVERDUE_UNRESOLVED' | 'MISSED_CHECKIN' | 'OVERDUE_CHECKOUT';
     isOverdue: boolean;
     overdueMinutes: number;
   };

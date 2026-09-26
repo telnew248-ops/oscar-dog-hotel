@@ -43,7 +43,7 @@ interface BookingDraft {
 }
 
 export const NewBookingPage: React.FC = () => {
-  const { dogs, addBooking, navigate, showToast } = useApp();
+  const { dogs, addBooking, navigate, showToast, selectedDogId: preselectedDogId } = useApp();
 
   const todayStr = useMemo(() => getTodayDateString(), []);
   const defaultCheckOutStr = useMemo(() => addDaysToDateString(todayStr, 3), [todayStr]);
@@ -65,14 +65,29 @@ export const NewBookingPage: React.FC = () => {
     };
   }, [dogs, todayStr, defaultCheckOutStr]);
 
-  const [selectedDogId, setSelectedDogId] = useState<string>(initialDraft.selectedDogId || dogs[0]?.id || '');
-  const [checkInDate, setCheckInDate] = useState<string>(initialDraft.checkInDate || todayStr);
+  // Requirement 11: Auto-preselect dog if navigated from Dog Details
+  const initialDogId = preselectedDogId || initialDraft.selectedDogId || dogs[0]?.id || '';
+  const [selectedDogId, setSelectedDogId] = useState<string>(initialDogId);
+
+  // Requirement 12: Check-in date MUST default to CURRENT date (today), never an old date from previous session
+  const [checkInDate, setCheckInDate] = useState<string>(todayStr);
   const [checkInTime, setCheckInTime] = useState<string>(initialDraft.checkInTime || '10:15 AM');
-  const [checkOutDate, setCheckOutDate] = useState<string>(initialDraft.checkOutDate || defaultCheckOutStr);
+  const [checkOutDate, setCheckOutDate] = useState<string>(
+    initialDraft.checkOutDate && initialDraft.checkOutDate > todayStr
+      ? initialDraft.checkOutDate
+      : defaultCheckOutStr
+  );
   const [checkOutTime, setCheckOutTime] = useState<string>(initialDraft.checkOutTime || '10:00 AM');
   const [bookingStatus, setBookingStatus] = useState<UniversalStatus>(initialDraft.bookingStatus || 'UPCOMING');
   const [selectedServices, setSelectedServices] = useState<string[]>(initialDraft.selectedServices || []);
   const [notes, setNotes] = useState(initialDraft.notes || '');
+
+  // Keep selected dog in sync if preselectedDogId is provided
+  useEffect(() => {
+    if (preselectedDogId && dogs.some((d) => d.id === preselectedDogId)) {
+      setSelectedDogId(preselectedDogId);
+    }
+  }, [preselectedDogId, dogs]);
 
   // Dog Search states (Requirement 3: Search like Dashboard)
   const [dogSearchQuery, setDogSearchQuery] = useState('');

@@ -25,6 +25,33 @@ export const BookingsPage: React.FC = () => {
     });
   }, [bookings, dogs]);
 
+  // Date relevance helper (Requirements 6 & 7: No duplicate upcoming bookings)
+  const isBookingRelevantToDate = (b: typeof enrichedBookings[0], targetDate: string): boolean => {
+    if (!b || !b.checkInDate || !b.checkOutDate) return false;
+
+    const isCheckInDay = b.checkInDate === targetDate;
+    const isCheckOutDay = b.checkOutDate === targetDate;
+    const isSpanningStay = b.checkInDate < targetDate && b.checkOutDate > targetDate;
+
+    // Check-in day: relevant
+    if (isCheckInDay) return true;
+
+    // Check-out day: relevant
+    if (isCheckOutDay) return true;
+
+    // Intermediate days: ONLY relevant if dog is actively in the hotel
+    if (isSpanningStay && (b.status === 'IN_HOTEL' || b.status === 'RECEIVED' || b.status === 'OUTGOING')) {
+      return true;
+    }
+
+    return false;
+  };
+
+  // Only bookings relevant to the selected date
+  const dateRelevantBookings = useMemo(() => {
+    return enrichedBookings.filter((b) => isBookingRelevantToDate(b, selectedDate));
+  }, [enrichedBookings, selectedDate]);
+
   // Date-Aware Status Rules (Requirements 9, 10, 11, 12, 13)
   const allowedStatuses: UniversalStatus[] = useMemo(() => {
     const cmp = compareDateStrings(selectedDate, todayStr);
@@ -49,22 +76,22 @@ export const BookingsPage: React.FC = () => {
 
   // Filter based on activeStatus and date-allowed statuses
   const filteredBookings = useMemo(() => {
-    return enrichedBookings.filter((b) => {
+    return dateRelevantBookings.filter((b) => {
       if (activeStatus === 'ALL') {
         return allowedStatuses.includes(b.status);
       }
       return b.status === activeStatus;
     });
-  }, [enrichedBookings, activeStatus, allowedStatuses]);
+  }, [dateRelevantBookings, activeStatus, allowedStatuses]);
 
-  // Dynamic filter tabs respecting allowedStatuses sequence
+  // Dynamic filter tabs respecting allowedStatuses sequence and date relevance
   const filterTabs = useMemo(() => {
     const tabs: { label: string; key: UniversalStatus | 'ALL'; count: number }[] = [
-      { label: 'All', key: 'ALL', count: enrichedBookings.filter((b) => allowedStatuses.includes(b.status)).length }
+      { label: 'All', key: 'ALL', count: dateRelevantBookings.filter((b) => allowedStatuses.includes(b.status)).length }
     ];
 
     allowedStatuses.forEach((st) => {
-      const count = enrichedBookings.filter((b) => b.status === st).length;
+      const count = dateRelevantBookings.filter((b) => b.status === st).length;
       const config = getStatusConfig(st);
       tabs.push({
         label: config.label,
@@ -74,7 +101,7 @@ export const BookingsPage: React.FC = () => {
     });
 
     return tabs;
-  }, [allowedStatuses, enrichedBookings]);
+  }, [allowedStatuses, dateRelevantBookings]);
 
   const shiftDate = (days: number) => {
     setSelectedDate((prev) => addDaysToDateString(prev, days));
@@ -241,8 +268,8 @@ export const BookingsPage: React.FC = () => {
               >
                 {/* Dog & Owner Info Header */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <DogAvatar avatarId={dog?.avatarId} size="md" />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <DogAvatar avatarId={dog?.avatarId} size="lg" />
                     <div>
                       <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
                         {dog?.name || 'Unknown Dog'}

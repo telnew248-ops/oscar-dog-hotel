@@ -5,7 +5,7 @@
  */
 
 import { supabase } from './supabase';
-import { getTodayDateString, toDateString } from '../utils/date';
+import { getTodayDateString, toDateString, classifyBooking } from '../utils/date';
 
 export class ApiError extends Error {
   public readonly code: string;
@@ -171,28 +171,72 @@ export function getCheckoutAttentionState(booking: any, currentTime: Date = new 
 export function pickRelevantBooking(bookings: any[], currentTime: Date = new Date()) {
   if (!bookings || bookings.length === 0) return null;
 
-  // 1. Currently active: checkIn <= now AND checkOut >= now AND active status
+  const todayStr = getTodayDateString();
+
+  // 1. Action Required: Missed Check-in or Overdue Checkout
+  const actionRequired = bookings
+    .filter((b) => {
+      const cls = classifyBooking(
+        {
+          status: b.current_status || b.status,
+          checkInAt: b.check_in_at || b.checkInAt,
+          checkOutAt: b.check_out_at || b.checkOutAt,
+          isOutgoingConfirmed: b.is_outgoing_confirmed ?? false
+        },
+        todayStr,
+        currentTime
+      );
+      return cls === 'MISSED_CHECKIN' || cls === 'OVERDUE_CHECKOUT';
+    })
+    .sort((a, b) => new Date(a.check_in_at || a.checkInAt).getTime() - new Date(b.check_in_at || b.checkInAt).getTime())[0];
+  if (actionRequired) return formatBookingResponse(actionRequired, currentTime);
+
+  // 2. Currently Active stay: dog in hotel or checking in/out today
   const active = bookings
     .filter((b) => {
-      const cin = new Date(b.check_in_at);
-      const cout = new Date(b.check_out_at);
-      const activeStatuses = ['IN_HOTEL', 'OUTGOING', 'RECEIVED'];
-      return activeStatuses.includes(b.current_status) && cin <= currentTime && cout >= currentTime;
+      const cls = classifyBooking(
+        {
+          status: b.current_status || b.status,
+          checkInAt: b.check_in_at || b.checkInAt,
+          checkOutAt: b.check_out_at || b.checkOutAt,
+          isOutgoingConfirmed: b.is_outgoing_confirmed ?? false
+        },
+        todayStr,
+        currentTime
+      );
+      return cls === 'ACTIVE_STAY' || cls === 'TODAY_CHECKIN' || cls === 'TODAY_CHECKOUT';
     })
-    .sort((a, b) => new Date(b.check_in_at).getTime() - new Date(a.check_in_at).getTime())[0];
+    .sort((a, b) => new Date(a.check_in_at || a.checkInAt).getTime() - new Date(b.check_in_at || b.checkInAt).getTime())[0];
   if (active) return formatBookingResponse(active, currentTime);
 
-  // 2. Nearest upcoming (checkIn strictly in the future)
+  // 3. Nearest future UPCOMING booking
   const upcoming = bookings
-    .filter((b) => b.current_status === 'UPCOMING' && new Date(b.check_in_at) > currentTime)
-    .sort((a, b) => new Date(a.check_in_at).getTime() - new Date(b.check_in_at).getTime())[0];
+    .filter((b) => {
+      const cls = classifyBooking(
+        {
+          status: b.current_status || b.status,
+          checkInAt: b.check_in_at || b.checkInAt,
+          checkOutAt: b.check_out_at || b.checkOutAt
+        },
+        todayStr,
+        currentTime
+      );
+      return cls === 'UPCOMING';
+    })
+    .sort((a, b) => new Date(a.check_in_at || a.checkInAt).getTime() - new Date(b.check_in_at || b.checkInAt).getTime())[0];
   if (upcoming) return formatBookingResponse(upcoming, currentTime);
 
-  // 3. Most recent historical stay (for display purposes only)
-  const recent = [...bookings]
-    .filter((b) => b.current_status !== 'CANCEL')
-    .sort((a, b) => new Date(b.check_out_at).getTime() - new Date(a.check_out_at).getTime())[0];
-  if (recent) return formatBookingResponse(recent, currentTime);
+  // 4. Most recent COMPLETED
+  const completed = bookings
+    .filter((b) => (b.current_status || b.status) === 'COMPLETE')
+    .sort((a, b) => new Date(b.check_out_at || b.checkOutAt).getTime() - new Date(a.check_out_at || a.checkOutAt).getTime())[0];
+  if (completed) return formatBookingResponse(completed, currentTime);
+
+  // 5. Most recent other non-cancelled
+  const nonCancelled = bookings
+    .filter((b) => (b.current_status || b.status) !== 'CANCEL')
+    .sort((a, b) => new Date(b.check_out_at || b.checkOutAt).getTime() - new Date(a.check_out_at || a.checkOutAt).getTime())[0];
+  if (nonCancelled) return formatBookingResponse(nonCancelled, currentTime);
 
   return null;
 }
@@ -869,7 +913,74 @@ export const api = {
       return formatBookingResponse(updated);
     },
 
-    async extendBooking(id: string, newCheckOutAtStr: string, notes?: string) {
+    async rescheduleCheckIn(id: string, newCheckInAtStr: string, notes?: string) {
+      const orgId = getCurrentOrganizationId();
+      const newCheckInAt = new Date(newCheckInAtStr);
+
+      const { data: current, error: getErr } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('id', id)
+        .eq('organization_id', orgId)
+        .single();
+
+      if (getErr || !current) {
+        throw new ApiError(404, 'BOOKING_NOT_FOUND', 'Booking not found');
+      }
+
+      const checkOutAt = new Date(current.check_out_at);
+      if (newCheckInAt >= checkOutAt) {
+        throw new ApiError(
+          400,
+          'BOOKING_INVALID_TIME_RANGE',
+          'New check-in date and time must be before check-out date and time'
+        );
+      }
+
+      // Overlap check excluding current booking
+      const { data: conflicts } = await supabase
+        .from('bookings')
+        .select('id, check_in_at, check_out_at, current_status')
+        .eq('dog_id', current.dog_id)
+        .eq('organization_id', orgId)
+        .neq('id', id)
+        .neq('current_status', 'CANCEL')
+        .lt('check_in_at', checkOutAt.toISOString())
+        .gt('check_out_at', newCheckInAt.toISOString());
+
+      if (conflicts && conflicts.length > 0) {
+        const conflict = conflicts[0];
+        throw new ApiError(
+          409,
+          'BOOKING_OVERLAP',
+          `Rescheduled check-in overlaps with another booking for this dog (Status: ${conflict.current_status})`
+        );
+      }
+
+      const updatedNotes = notes
+        ? (current.notes ? `${current.notes} | Rescheduled check-in: ${notes}` : `Rescheduled check-in: ${notes}`)
+        : current.notes;
+
+      const { data: updated, error: updateErr } = await supabase
+        .from('bookings')
+        .update({
+          check_in_at: newCheckInAt.toISOString(),
+          notes: updatedNotes,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', id)
+        .eq('organization_id', orgId)
+        .select('*, dog:dogs(*, owner:owners(*))')
+        .single();
+
+      if (updateErr) {
+        throw new ApiError(500, 'DB_ERROR', updateErr.message);
+      }
+
+      return formatBookingResponse(updated);
+    },
+
+    async rescheduleCheckOut(id: string, newCheckOutAtStr: string, notes?: string) {
       const orgId = getCurrentOrganizationId();
       const newCheckOutAt = new Date(newCheckOutAtStr);
 
@@ -909,12 +1020,12 @@ export const api = {
         throw new ApiError(
           409,
           'BOOKING_OVERLAP',
-          `Extended stay overlaps with another booking for this dog (Status: ${conflict.current_status})`
+          `Rescheduled check-out overlaps with another booking for this dog (Status: ${conflict.current_status})`
         );
       }
 
       const updatedNotes = notes
-        ? (current.notes ? `${current.notes} | Extended: ${notes}` : `Extended: ${notes}`)
+        ? (current.notes ? `${current.notes} | Rescheduled checkout: ${notes}` : `Rescheduled checkout: ${notes}`)
         : current.notes;
 
       const { data: updated, error: updateErr } = await supabase
@@ -935,6 +1046,10 @@ export const api = {
       }
 
       return formatBookingResponse(updated);
+    },
+
+    async extendBooking(id: string, newCheckOutAtStr: string, notes?: string) {
+      return this.rescheduleCheckOut(id, newCheckOutAtStr, notes);
     },
 
     async updateBookingStatus(
@@ -1105,14 +1220,16 @@ export const api = {
         }
 
         // Upcoming: checkIn strictly in the future AND status is UPCOMING
-        if (b.status === 'UPCOMING' && checkInTime > now) {
+        if (b.status === 'UPCOMING' && checkInTime > now && inDateStr > todayStr) {
           upcomingCount++;
         }
 
         // Today hotel view: arriving today, leaving today, or currently active
-        const isTouchingToday = inDateStr === todayStr || outDateStr === todayStr;
-        const isActiveNow = checkInTime <= now && checkOutTime >= now && !isFinal;
-        if ((isTouchingToday || isActiveNow) && !isFinal) {
+        // Strictly exclude missed check-ins from past days
+        const isArrivingToday = inDateStr === todayStr && !isFinal;
+        const isDepartingToday = outDateStr === todayStr && !isFinal;
+        const isActiveNow = checkInTime <= now && checkOutTime >= now && !isFinal && b.status !== 'UPCOMING';
+        if (isArrivingToday || isDepartingToday || isActiveNow) {
           inHotelTodayAll++;
           todayCheckInOut.push({
             bookingId: b.id,
@@ -1128,7 +1245,7 @@ export const api = {
         }
 
         // --- Overdue / Action Required logic ---
-        // Rule: now > checkOut AND not COMPLETE AND not CANCEL → Action Required
+        // Rule 1: Overdue Checkout (dog checked in, past checkout time, not checked out)
         if (!isFinal && now > checkOutTime && !seenOverdueBookingIds.has(b.id)) {
           seenOverdueBookingIds.add(b.id);
           const overdueMinutes = Math.floor((now.getTime() - checkOutTime.getTime()) / (1000 * 60));
@@ -1145,6 +1262,10 @@ export const api = {
             dogAvatarId: b.dog?.avatar_id || 'avatar_1',
             ownerName: b.dog?.owner?.name || 'Unknown Owner',
             ownerPhone: b.dog?.owner?.display_phone || b.dog?.owner?.normalized_phone || '',
+            alertTitle: 'Checkout overdue',
+            alertType: 'OVERDUE_CHECKOUT',
+            scheduledEventDate: outDateStr,
+            scheduledEventDateFormatted: `${b.checkOutLocal.dateFormatted} at ${b.checkOutLocal.timeFormatted}`,
             scheduledCheckOut: b.checkOutAt,
             scheduledCheckOutFormatted: `${b.checkOutLocal.dateFormatted} at ${b.checkOutLocal.timeFormatted}`,
             currentStatus: b.status,
@@ -1157,7 +1278,7 @@ export const api = {
           });
         }
 
-        // Missed check-in: UPCOMING but checkIn time has passed
+        // Rule 2: Missed Check-in (status is UPCOMING but checkIn time has passed)
         if (b.status === 'UPCOMING' && checkInTime < now && !seenOverdueBookingIds.has(b.id)) {
           seenOverdueBookingIds.add(b.id);
           overdueAttentionList.push({
@@ -1168,8 +1289,12 @@ export const api = {
             dogAvatarId: b.dog?.avatar_id || 'avatar_1',
             ownerName: b.dog?.owner?.name || 'Unknown Owner',
             ownerPhone: b.dog?.owner?.display_phone || b.dog?.owner?.normalized_phone || '',
-            scheduledCheckOut: b.checkOutAt,
-            scheduledCheckOutFormatted: `${b.checkOutLocal.dateFormatted} at ${b.checkOutLocal.timeFormatted}`,
+            alertTitle: 'Check-in overdue',
+            alertType: 'MISSED_CHECKIN',
+            scheduledEventDate: inDateStr,
+            scheduledEventDateFormatted: `${b.checkInLocal.dateFormatted} at ${b.checkInLocal.timeFormatted}`,
+            scheduledCheckOut: b.checkInAt,
+            scheduledCheckOutFormatted: `${b.checkInLocal.dateFormatted} at ${b.checkInLocal.timeFormatted}`,
             currentStatus: b.status,
             attention: {
               requiresAttention: true,

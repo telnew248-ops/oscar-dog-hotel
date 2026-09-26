@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { DogAvatar } from '../components/common/DogAvatar';
 import { StatusBadge } from '../components/common/StatusBadge';
@@ -16,6 +16,7 @@ import {
   Trash2,
   Plus
 } from 'lucide-react';
+import { getTodayDateString, combineDateAndTime, classifyBooking } from '../utils/date';
 
 export const DogDetailsPage: React.FC = () => {
   const {
@@ -27,17 +28,66 @@ export const DogDetailsPage: React.FC = () => {
     goBack,
     navigate,
     bookings,
-    extendBooking,
+    rescheduleCheckIn,
+    rescheduleCheckOut,
     confirmOutgoing,
     showToast
   } = useApp();
   const dog = selectedDogId ? getDogById(selectedDogId) : undefined;
-  const activeBooking = dog ? bookings.find((b) => b.dogId === dog.id) : undefined;
 
-  const [showExtendModal, setShowExtendModal] = useState(false);
-  const [extendCheckOutDate, setExtendCheckOutDate] = useState('');
-  const [extendNotes, setExtendNotes] = useState('');
-  const [isExtending, setIsExtending] = useState(false);
+  // Deterministic booking selection (Requirement 20)
+  const dogBookings = useMemo(() => {
+    if (!dog) return [];
+    return bookings.filter((b) => b.dogId === dog.id);
+  }, [dog, bookings]);
+
+  const activeBooking = useMemo(() => {
+    if (dogBookings.length === 0) return undefined;
+    const todayStr = getTodayDateString();
+    const now = new Date();
+
+    // 1. Action required: missed check-in or overdue checkout
+    const actionReq = dogBookings.find((b) => {
+      const cls = classifyBooking(b, todayStr, now);
+      return cls === 'MISSED_CHECKIN' || cls === 'OVERDUE_CHECKOUT';
+    });
+    if (actionReq) return actionReq;
+
+    // 2. Active in hotel or arriving/departing today
+    const activeStay = dogBookings.find((b) => {
+      const cls = classifyBooking(b, todayStr, now);
+      return cls === 'ACTIVE_STAY' || cls === 'TODAY_CHECKIN' || cls === 'TODAY_CHECKOUT';
+    });
+    if (activeStay) return activeStay;
+
+    // 3. Nearest future upcoming
+    const upcoming = [...dogBookings]
+      .filter((b) => classifyBooking(b, todayStr, now) === 'UPCOMING')
+      .sort((a, b) => new Date(a.checkInDate).getTime() - new Date(b.checkInDate).getTime())[0];
+    if (upcoming) return upcoming;
+
+    // 4. Most recent completed
+    const completed = [...dogBookings]
+      .filter((b) => b.status === 'COMPLETE')
+      .sort((a, b) => new Date(b.checkOutDate).getTime() - new Date(a.checkOutDate).getTime())[0];
+    if (completed) return completed;
+
+    return dogBookings[0];
+  }, [dogBookings]);
+
+  // Reschedule Check-In modal state (Requirement 15)
+  const [showRescheduleCheckInModal, setShowRescheduleCheckInModal] = useState(false);
+  const [newCheckInDate, setNewCheckInDate] = useState('');
+  const [newCheckInTime, setNewCheckInTime] = useState('10:00 AM');
+  const [checkInNotes, setCheckInNotes] = useState('');
+  const [isReschedulingCheckIn, setIsReschedulingCheckIn] = useState(false);
+
+  // Reschedule Check-Out modal state (Requirement 16)
+  const [showRescheduleCheckOutModal, setShowRescheduleCheckOutModal] = useState(false);
+  const [newCheckOutDate, setNewCheckOutDate] = useState('');
+  const [newCheckOutTime, setNewCheckOutTime] = useState('10:00 AM');
+  const [checkOutNotes, setCheckOutNotes] = useState('');
+  const [isReschedulingCheckOut, setIsReschedulingCheckOut] = useState(false);
 
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(dog?.name || '');
@@ -90,30 +140,55 @@ export const DogDetailsPage: React.FC = () => {
     }
   };
 
-  const handleExtendStay = async () => {
-    if (!activeBooking) {
-      showToast('No active stay to extend.', 'error');
+  const handleRescheduleCheckIn = async () => {
+    if (!activeBooking) return;
+    if (!newCheckInDate) {
+      showToast('Please select a valid check-in date.', 'error');
       return;
     }
-    if (!extendCheckOutDate) {
-      showToast('Please select a new check-out date.', 'error');
+    const targetCheckInIso = combineDateAndTime(newCheckInDate, newCheckInTime);
+    const targetCheckOutIso = combineDateAndTime(activeBooking.checkOutDate, activeBooking.checkOutTime || '10:00 AM');
+
+    if (new Date(targetCheckInIso).getTime() >= new Date(targetCheckOutIso).getTime()) {
+      showToast('Check-in must be scheduled before check-out date and time.', 'error');
       return;
     }
 
-    setIsExtending(true);
+    setIsReschedulingCheckIn(true);
     try {
-      await extendBooking(
-        activeBooking.id,
-        new Date(extendCheckOutDate).toISOString(),
-        extendNotes.trim() || undefined
-      );
-      setShowExtendModal(false);
-      setExtendCheckOutDate('');
-      setExtendNotes('');
+      await rescheduleCheckIn(activeBooking.id, targetCheckInIso, checkInNotes.trim() || undefined);
+      setShowRescheduleCheckInModal(false);
+      setCheckInNotes('');
     } catch (err: any) {
-      showToast(err.message || 'Failed to extend stay', 'error');
+      showToast(err.message || 'Failed to reschedule check-in', 'error');
     } finally {
-      setIsExtending(false);
+      setIsReschedulingCheckIn(false);
+    }
+  };
+
+  const handleRescheduleCheckOut = async () => {
+    if (!activeBooking) return;
+    if (!newCheckOutDate) {
+      showToast('Please select a valid check-out date.', 'error');
+      return;
+    }
+    const targetCheckInIso = combineDateAndTime(activeBooking.checkInDate, activeBooking.checkInTime || '10:00 AM');
+    const targetCheckOutIso = combineDateAndTime(newCheckOutDate, newCheckOutTime);
+
+    if (new Date(targetCheckOutIso).getTime() <= new Date(targetCheckInIso).getTime()) {
+      showToast('Check-out must be scheduled after check-in date and time.', 'error');
+      return;
+    }
+
+    setIsReschedulingCheckOut(true);
+    try {
+      await rescheduleCheckOut(activeBooking.id, targetCheckOutIso, checkOutNotes.trim() || undefined);
+      setShowRescheduleCheckOutModal(false);
+      setCheckOutNotes('');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to reschedule check-out', 'error');
+    } finally {
+      setIsReschedulingCheckOut(false);
     }
   };
 
@@ -200,38 +275,86 @@ export const DogDetailsPage: React.FC = () => {
               Booking Information
             </h3>
           </div>
-          {dog.checkInDate && (
-            <StatusBadge status={dog.status} size="sm" />
-          )}
+          <StatusBadge status={activeBooking?.status || dog.status} size="sm" />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', background: '#f7fbff', padding: '12px', borderRadius: '12px' }}>
-          <div>
-            <p style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)', marginBottom: '2px' }}>Check-In</p>
-            <p style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-              {dog.checkInDate || '—'}
-            </p>
-            {dog.checkInTime && (
-              <p style={{ fontSize: '0.76rem', color: 'var(--color-text-secondary)' }}>
-                {dog.checkInTime}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', background: '#f7fbff', padding: '14px', borderRadius: '12px', border: '1px solid #e1effe' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '6px' }}>
+            <div>
+              <p style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)', marginBottom: '2px', fontWeight: 600 }}>Check-In</p>
+              <p style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+                {activeBooking?.checkInDate || dog.checkInDate || '—'}
               </p>
+              {(activeBooking?.checkInTime || dog.checkInTime) && (
+                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+                  {activeBooking?.checkInTime || dog.checkInTime}
+                </p>
+              )}
+            </div>
+            {activeBooking && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setNewCheckInDate(activeBooking.checkInDate || '');
+                  setNewCheckInTime(activeBooking.checkInTime || '10:00 AM');
+                  setShowRescheduleCheckInModal(true);
+                }}
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '5px 10px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  alignSelf: 'flex-start',
+                  marginTop: '4px'
+                }}
+              >
+                <Calendar size={13} />
+                <span>Reschedule</span>
+              </button>
             )}
           </div>
 
-          <div>
-            <p style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)', marginBottom: '2px' }}>Check-Out</p>
-            <p style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-              {dog.checkOutDate || '—'}
-            </p>
-            {dog.checkOutTime && (
-              <p style={{ fontSize: '0.76rem', color: 'var(--color-text-secondary)' }}>
-                {dog.checkOutTime}
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '6px' }}>
+            <div>
+              <p style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)', marginBottom: '2px', fontWeight: 600 }}>Check-Out</p>
+              <p style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+                {activeBooking?.checkOutDate || dog.checkOutDate || '—'}
               </p>
+              {(activeBooking?.checkOutTime || dog.checkOutTime) && (
+                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+                  {activeBooking?.checkOutTime || dog.checkOutTime}
+                </p>
+              )}
+            </div>
+            {activeBooking && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setNewCheckOutDate(activeBooking.checkOutDate || '');
+                  setNewCheckOutTime(activeBooking.checkOutTime || '10:00 AM');
+                  setShowRescheduleCheckOutModal(true);
+                }}
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '5px 10px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  alignSelf: 'flex-start',
+                  marginTop: '4px'
+                }}
+              >
+                <Calendar size={13} />
+                <span>Reschedule</span>
+              </button>
             )}
           </div>
         </div>
 
-        {!dog.checkInDate && (
+        {!activeBooking && !dog.checkInDate && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
             <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
               This dog profile has no active reservation.
@@ -243,7 +366,7 @@ export const DogDetailsPage: React.FC = () => {
               style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '0.85rem', padding: '9px 14px' }}
             >
               <Plus size={16} strokeWidth={2.5} />
-              <span>Create Reservation</span>
+              <span>Create New Booking</span>
             </button>
           </div>
         )}
@@ -326,25 +449,17 @@ export const DogDetailsPage: React.FC = () => {
       )}
 
       {/* Operational Stay Actions */}
-      {activeBooking && (
+      {activeBooking && (activeBooking.status === 'IN_HOTEL' || activeBooking.status === 'OUTGOING') && (
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
             Stay Management
           </h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => setShowExtendModal(true)}
-              style={{ padding: '10px', fontSize: '0.85rem' }}
-            >
-              Extend Stay
-            </button>
+          <div>
             <button
               type="button"
               className="btn-primary"
               onClick={handleConfirmDeparture}
-              style={{ padding: '10px', fontSize: '0.85rem', backgroundColor: '#1267df' }}
+              style={{ width: '100%', padding: '10px', fontSize: '0.85rem', backgroundColor: '#1267df' }}
             >
               Confirm Departure
             </button>
@@ -570,8 +685,8 @@ export const DogDetailsPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Extend Stay Modal */}
-      {showExtendModal && (
+      {/* Reschedule Check-In Modal (Requirement 15) */}
+      {showRescheduleCheckInModal && activeBooking && (
         <div style={{
           position: 'fixed',
           top: 0, left: 0, right: 0, bottom: 0,
@@ -582,36 +697,57 @@ export const DogDetailsPage: React.FC = () => {
           padding: '20px',
           zIndex: 9999
         }}>
-          <div className="card" style={{ maxWidth: '400px', width: '100%', padding: '24px', backgroundColor: '#ffffff', borderRadius: '16px' }}>
+          <div className="card" style={{ maxWidth: '420px', width: '100%', padding: '24px', backgroundColor: '#ffffff', borderRadius: '16px' }}>
             <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-text-primary)', marginBottom: '4px' }}>
-              Extend Stay for {dog.name}
+              Reschedule Check-In
             </h3>
             <p style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', marginBottom: '16px' }}>
-              Current scheduled checkout: {dog.checkOutDate}
+              Current scheduled check-in: <strong>{activeBooking.checkInDate} {activeBooking.checkInTime || ''}</strong>
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, marginBottom: '6px' }}>
-                  New Check-Out Date *
+                  New Check-In Date *
                 </label>
                 <input
                   type="date"
-                  value={extendCheckOutDate}
-                  onChange={(e) => setExtendCheckOutDate(e.target.value)}
+                  value={newCheckInDate}
+                  onChange={(e) => setNewCheckInDate(e.target.value)}
                   style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid var(--color-border)', fontSize: '0.9rem' }}
                 />
               </div>
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, marginBottom: '6px' }}>
-                  Extension Notes
+                  New Check-In Time
+                </label>
+                <input
+                  type="time"
+                  defaultValue="10:00"
+                  onChange={(e) => {
+                    const [h, m] = e.target.value.split(':');
+                    let hour = parseInt(h, 10);
+                    const ampm = hour >= 12 ? 'PM' : 'AM';
+                    hour = hour % 12 || 12;
+                    setNewCheckInTime(`${String(hour).padStart(2, '0')}:${m} ${ampm}`);
+                  }}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid var(--color-border)', fontSize: '0.9rem' }}
+                />
+                <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                  Selected time: <strong>{newCheckInTime}</strong>
+                </p>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, marginBottom: '6px' }}>
+                  Reschedule Reason / Notes
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Flight delay / Owner requested extra days"
-                  value={extendNotes}
-                  onChange={(e) => setExtendNotes(e.target.value)}
+                  placeholder="e.g. Owner delayed arrival"
+                  value={checkInNotes}
+                  onChange={(e) => setCheckInNotes(e.target.value)}
                   style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid var(--color-border)', fontSize: '0.9rem' }}
                 />
               </div>
@@ -621,7 +757,7 @@ export const DogDetailsPage: React.FC = () => {
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={() => setShowExtendModal(false)}
+                onClick={() => setShowRescheduleCheckInModal(false)}
                 style={{ flex: 1 }}
               >
                 Cancel
@@ -629,11 +765,102 @@ export const DogDetailsPage: React.FC = () => {
               <button
                 type="button"
                 className="btn-primary"
-                onClick={handleExtendStay}
-                disabled={isExtending}
+                onClick={handleRescheduleCheckIn}
+                disabled={isReschedulingCheckIn}
                 style={{ flex: 1.5 }}
               >
-                {isExtending ? 'Extending...' : 'Confirm Extension'}
+                {isReschedulingCheckIn ? 'Saving...' : 'Confirm Reschedule'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reschedule Check-Out Modal (Requirement 16) */}
+      {showRescheduleCheckOutModal && activeBooking && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.55)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '20px',
+          zIndex: 9999
+        }}>
+          <div className="card" style={{ maxWidth: '420px', width: '100%', padding: '24px', backgroundColor: '#ffffff', borderRadius: '16px' }}>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-text-primary)', marginBottom: '4px' }}>
+              Reschedule Check-Out
+            </h3>
+            <p style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', marginBottom: '16px' }}>
+              Current scheduled check-out: <strong>{activeBooking.checkOutDate} {activeBooking.checkOutTime || ''}</strong>
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, marginBottom: '6px' }}>
+                  New Check-Out Date *
+                </label>
+                <input
+                  type="date"
+                  value={newCheckOutDate}
+                  onChange={(e) => setNewCheckOutDate(e.target.value)}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid var(--color-border)', fontSize: '0.9rem' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, marginBottom: '6px' }}>
+                  New Check-Out Time
+                </label>
+                <input
+                  type="time"
+                  defaultValue="10:00"
+                  onChange={(e) => {
+                    const [h, m] = e.target.value.split(':');
+                    let hour = parseInt(h, 10);
+                    const ampm = hour >= 12 ? 'PM' : 'AM';
+                    hour = hour % 12 || 12;
+                    setNewCheckOutTime(`${String(hour).padStart(2, '0')}:${m} ${ampm}`);
+                  }}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid var(--color-border)', fontSize: '0.9rem' }}
+                />
+                <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                  Selected time: <strong>{newCheckOutTime}</strong>
+                </p>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, marginBottom: '6px' }}>
+                  Reschedule Reason / Notes
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Extra day requested / Flight delay"
+                  value={checkOutNotes}
+                  onChange={(e) => setCheckOutNotes(e.target.value)}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid var(--color-border)', fontSize: '0.9rem' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setShowRescheduleCheckOutModal(false)}
+                style={{ flex: 1 }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={handleRescheduleCheckOut}
+                disabled={isReschedulingCheckOut}
+                style={{ flex: 1.5 }}
+              >
+                {isReschedulingCheckOut ? 'Saving...' : 'Confirm Reschedule'}
               </button>
             </div>
           </div>
