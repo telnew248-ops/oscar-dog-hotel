@@ -164,6 +164,7 @@ function mapBackendBookingToFrontend(b: any): Booking {
     status: (b.currentStatus || b.current_status || b.status || 'UPCOMING') as UniversalStatus,
     services: Array.isArray(b.services) ? b.services : (typeof b.services === 'string' ? JSON.parse(b.services) : []),
     notes: b.notes,
+    deliveryMethod: b.deliveryMethod || b.delivery_method || undefined,
     durationNights: b.duration?.nights || b.durationNights || 1,
     createdAt: b.createdAt || b.created_at || new Date().toISOString(),
     updatedAt: b.updatedAt || b.updated_at || new Date().toISOString()
@@ -530,7 +531,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         gender: updates.gender,
         weightKg: updates.weightKg,
         avatarId: updates.avatarId,
-        specialNotes: updates.notes
+        specialNotes: updates.notes,
+        ownerName: updates.ownerName,
+        ownerPhone: updates.ownerPhone,
+        ownerEmail: updates.ownerEmail
       });
       showToast('Dog information updated in database!', 'success');
       await refreshData();
@@ -618,7 +622,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         checkOutAt: checkOutIso,
         status: bookingData.status,
         services: bookingData.services,
-        notes: bookingData.notes
+        notes: bookingData.notes,
+        deliveryMethod: bookingData.deliveryMethod
       });
 
       const newBooking = mapBackendBookingToFrontend(createdBackendBooking);

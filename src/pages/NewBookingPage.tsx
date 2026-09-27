@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { DogAvatar } from '../components/common/DogAvatar';
 import { StatusSelector } from '../components/common/StatusSelector';
 import { UniversalStatus } from '../types';
-import { Plus, Check, Scissors, Pill, UtensilsCrossed, Footprints, Award, ShowerHead, RotateCcw, Search, X, Phone } from 'lucide-react';
+import { Plus, Check, Scissors, Pill, UtensilsCrossed, Footprints, Award, ShowerHead, RotateCcw, Search, X, Phone, Truck } from 'lucide-react';
 import { storageService } from '../services/storage';
 import { getTodayDateString, addDaysToDateString, compareDateStrings } from '../utils/date';
 import { matchDogSearch } from '../utils/search';
@@ -40,6 +40,10 @@ interface BookingDraft {
   bookingStatus: UniversalStatus;
   selectedServices: string[];
   notes: string;
+  checkInMethod?: 'STANDARD' | 'OSCAR_PICKUP';
+  checkInAddress?: string;
+  checkOutMethod?: 'OWNER_PICKUP' | 'OSCAR_DROPOFF';
+  checkOutAddress?: string;
 }
 
 export const NewBookingPage: React.FC = () => {
@@ -61,7 +65,11 @@ export const NewBookingPage: React.FC = () => {
       checkOutTime: '10:00 AM',
       bookingStatus: 'UPCOMING' as UniversalStatus,
       selectedServices: [] as string[],
-      notes: ''
+      notes: '',
+      checkInMethod: 'STANDARD' as 'STANDARD' | 'OSCAR_PICKUP',
+      checkInAddress: '',
+      checkOutMethod: 'OWNER_PICKUP' as 'OWNER_PICKUP' | 'OSCAR_DROPOFF',
+      checkOutAddress: ''
     };
   }, [dogs, todayStr, defaultCheckOutStr]);
 
@@ -81,6 +89,16 @@ export const NewBookingPage: React.FC = () => {
   const [bookingStatus, setBookingStatus] = useState<UniversalStatus>(initialDraft.bookingStatus || 'UPCOMING');
   const [selectedServices, setSelectedServices] = useState<string[]>(initialDraft.selectedServices || []);
   const [notes, setNotes] = useState(initialDraft.notes || '');
+
+  // Delivery Method state
+  const [checkInMethod, setCheckInMethod] = useState<'STANDARD' | 'OSCAR_PICKUP'>(
+    initialDraft.checkInMethod || 'STANDARD'
+  );
+  const [checkInAddress, setCheckInAddress] = useState<string>(initialDraft.checkInAddress || '');
+  const [checkOutMethod, setCheckOutMethod] = useState<'OWNER_PICKUP' | 'OSCAR_DROPOFF'>(
+    initialDraft.checkOutMethod || 'OWNER_PICKUP'
+  );
+  const [checkOutAddress, setCheckOutAddress] = useState<string>(initialDraft.checkOutAddress || '');
 
   // Keep selected dog in sync if preselectedDogId is provided
   useEffect(() => {
@@ -119,9 +137,26 @@ export const NewBookingPage: React.FC = () => {
       checkOutTime,
       bookingStatus,
       selectedServices,
-      notes
+      notes,
+      checkInMethod,
+      checkInAddress,
+      checkOutMethod,
+      checkOutAddress
     });
-  }, [selectedDogId, checkInDate, checkInTime, checkOutDate, checkOutTime, bookingStatus, selectedServices, notes]);
+  }, [
+    selectedDogId,
+    checkInDate,
+    checkInTime,
+    checkOutDate,
+    checkOutTime,
+    bookingStatus,
+    selectedServices,
+    notes,
+    checkInMethod,
+    checkInAddress,
+    checkOutMethod,
+    checkOutAddress
+  ]);
 
   // Date-Aware Allowed Statuses (Requirements 9-13)
   const allowedStatuses: UniversalStatus[] = useMemo(() => {
@@ -155,6 +190,10 @@ export const NewBookingPage: React.FC = () => {
     setBookingStatus('UPCOMING');
     setSelectedServices([]);
     setNotes('');
+    setCheckInMethod('STANDARD');
+    setCheckInAddress('');
+    setCheckOutMethod('OWNER_PICKUP');
+    setCheckOutAddress('');
     showToast('Booking form cleared.', 'info');
   };
 
@@ -204,6 +243,16 @@ export const NewBookingPage: React.FC = () => {
       return;
     }
 
+    const deliveryMethod =
+      checkInMethod === 'OSCAR_PICKUP' || checkOutMethod === 'OSCAR_DROPOFF'
+        ? {
+            checkInMethod,
+            checkInAddress: checkInMethod === 'OSCAR_PICKUP' ? checkInAddress.trim() : undefined,
+            checkOutMethod,
+            checkOutAddress: checkOutMethod === 'OSCAR_DROPOFF' ? checkOutAddress.trim() : undefined
+          }
+        : undefined;
+
     setIsSubmitting(true);
     try {
       await addBooking({
@@ -215,6 +264,7 @@ export const NewBookingPage: React.FC = () => {
         status: bookingStatus,
         services: selectedServices,
         notes: notes.trim() || undefined,
+        deliveryMethod,
         durationNights
       });
 
@@ -658,6 +708,119 @@ export const NewBookingPage: React.FC = () => {
                 </button>
               );
             })}
+          </div>
+        </div>
+
+        {/* Delivery Method (Optional) */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '16px' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Truck size={18} color="var(--color-primary)" />
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+                Delivery Method (optional)
+              </h3>
+            </div>
+            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
+              Pickup and drop-off transportation options
+            </p>
+          </div>
+
+          {/* Check-In Method */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <label style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+              Check-In Method
+            </label>
+            <div
+              onClick={() => setCheckInMethod(prev => prev === 'OSCAR_PICKUP' ? 'STANDARD' : 'OSCAR_PICKUP')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '12px 14px',
+                borderRadius: '8px',
+                border: `1.5px solid ${checkInMethod === 'OSCAR_PICKUP' ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                backgroundColor: checkInMethod === 'OSCAR_PICKUP' ? '#eaf2ff' : '#ffffff',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={checkInMethod === 'OSCAR_PICKUP'}
+                onChange={(e) => setCheckInMethod(e.target.checked ? 'OSCAR_PICKUP' : 'STANDARD')}
+                style={{ width: '18px', height: '18px', accentColor: 'var(--color-primary)', cursor: 'pointer' }}
+              />
+              <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                Oscar Pickup
+              </span>
+            </div>
+            {checkInMethod === 'OSCAR_PICKUP' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '2px' }}>
+                <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+                  Pickup Address
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Enter address for Oscar Pickup..."
+                  value={checkInAddress}
+                  onChange={(e) => setCheckInAddress(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: '1.5px solid var(--color-border)',
+                    fontSize: '0.9rem',
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Check-Out Method */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <label style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+              Check-out (dropdown option)
+            </label>
+            <select
+              value={checkOutMethod}
+              onChange={(e) => setCheckOutMethod(e.target.value as 'OWNER_PICKUP' | 'OSCAR_DROPOFF')}
+              style={{
+                width: '100%',
+                padding: '12px 14px',
+                borderRadius: '8px',
+                border: '1.5px solid var(--color-border)',
+                backgroundColor: '#ffffff',
+                fontSize: '0.9rem',
+                fontWeight: 600,
+                color: 'var(--color-text-primary)',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="OWNER_PICKUP">Owner Pickup</option>
+              <option value="OSCAR_DROPOFF">Oscar Drop-off</option>
+            </select>
+            {checkOutMethod === 'OSCAR_DROPOFF' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '2px' }}>
+                <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+                  Drop-off Address
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Enter address for Oscar Drop-off..."
+                  value={checkOutAddress}
+                  onChange={(e) => setCheckOutAddress(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: '1.5px solid var(--color-border)',
+                    fontSize: '0.9rem',
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+            )}
           </div>
         </div>
 

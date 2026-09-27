@@ -270,6 +270,7 @@ export function formatBookingResponse(b: any, currentTime: Date = new Date()) {
     status: b.current_status || b.status,
     services,
     notes: b.notes,
+    deliveryMethod: b.delivery_method || b.deliveryMethod || undefined,
     isOutgoingConfirmed: b.is_outgoing_confirmed ?? false,
     is_outgoing_confirmed: b.is_outgoing_confirmed ?? false,
     checkInLocal: {
@@ -621,9 +622,44 @@ export const api = {
         avatarId: string;
         specialNotes: string;
         ownerId: string;
+        ownerName?: string;
+        ownerPhone?: string;
+        ownerEmail?: string;
       }>
     ) {
       const orgId = getCurrentOrganizationId();
+
+      // 1. If owner fields are being updated, update the associated owner record
+      if (updates.ownerName !== undefined || updates.ownerPhone !== undefined || updates.ownerEmail !== undefined) {
+        const { data: dogRecord } = await supabase
+          .from('dogs')
+          .select('owner_id')
+          .eq('id', id)
+          .eq('organization_id', orgId)
+          .single();
+
+        if (dogRecord?.owner_id) {
+          const ownerPatch: any = { updated_at: new Date().toISOString() };
+          if (updates.ownerName !== undefined) ownerPatch.name = updates.ownerName.trim();
+          if (updates.ownerPhone !== undefined) {
+            const norm = normalizePhone(updates.ownerPhone);
+            ownerPatch.normalized_phone = norm;
+            ownerPatch.display_phone = formatDisplayPhone(norm);
+          }
+          if (updates.ownerEmail !== undefined) {
+            ownerPatch.email = updates.ownerEmail.trim() || null;
+          }
+          if (Object.keys(ownerPatch).length > 1) {
+            await supabase
+              .from('owners')
+              .update(ownerPatch)
+              .eq('id', dogRecord.owner_id)
+              .eq('organization_id', orgId);
+          }
+        }
+      }
+
+      // 2. Update dog record
       const patch: any = { updated_at: new Date().toISOString() };
       if (updates.name !== undefined) patch.name = updates.name.trim();
       if (updates.breed !== undefined) patch.breed = updates.breed.trim();
@@ -783,6 +819,7 @@ export const api = {
       status?: string;
       services?: string[];
       notes?: string;
+      deliveryMethod?: any;
     }) {
       const orgId = getCurrentOrganizationId();
       const checkInDate = new Date(data.checkInAt);
@@ -860,6 +897,7 @@ export const api = {
           current_status: initialStatus,
           services: data.services || [],
           notes: data.notes?.trim() || null,
+          delivery_method: data.deliveryMethod || null,
           is_outgoing_confirmed: false
         })
         .select('*, dog:dogs(*, owner:owners(*))')
@@ -889,6 +927,7 @@ export const api = {
         checkOutAt?: string;
         services?: string[];
         notes?: string | null;
+        deliveryMethod?: any;
       }
     ) {
       const orgId = getCurrentOrganizationId();
@@ -897,6 +936,7 @@ export const api = {
       if (data.checkOutAt) patch.check_out_at = new Date(data.checkOutAt).toISOString();
       if (data.services) patch.services = data.services;
       if (data.notes !== undefined) patch.notes = data.notes?.trim() || null;
+      if (data.deliveryMethod !== undefined) patch.delivery_method = data.deliveryMethod;
 
       const { data: updated, error } = await supabase
         .from('bookings')

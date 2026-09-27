@@ -61,6 +61,13 @@ export interface BookingService {
   icon: string;
 }
 
+export interface DeliveryMethod {
+  checkInMethod?: 'STANDARD' | 'OSCAR_PICKUP';
+  checkInAddress?: string;
+  checkOutMethod?: 'OWNER_PICKUP' | 'OSCAR_DROPOFF';
+  checkOutAddress?: string;
+}
+
 export interface Booking {
   id: string;
   dogId: string;
@@ -72,6 +79,7 @@ export interface Booking {
   status: UniversalStatus;
   services: string[]; // IDs of selected services: bathing, grooming, etc.
   notes?: string;
+  deliveryMethod?: DeliveryMethod;
   durationNights: number;
   createdAt: string;
   updatedAt: string;

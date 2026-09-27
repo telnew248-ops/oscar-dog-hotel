@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { DogAvatar } from '../components/common/DogAvatar';
 import { StatusBadge } from '../components/common/StatusBadge';
@@ -14,9 +14,28 @@ import {
   Edit3,
   Check,
   Trash2,
-  Plus
+  Plus,
+  ShowerHead,
+  Scissors,
+  Pill,
+  UtensilsCrossed,
+  Footprints,
+  Award,
+  FileText,
+  Truck,
+  AlertCircle,
+  X
 } from 'lucide-react';
 import { getTodayDateString, combineDateAndTime, classifyBooking } from '../utils/date';
+
+const SERVICE_META: Record<string, { label: string; icon: any }> = {
+  bathing: { label: 'Bathing', icon: ShowerHead },
+  grooming: { label: 'Grooming', icon: Scissors },
+  medication: { label: 'Medication', icon: Pill },
+  special_food: { label: 'Special Food', icon: UtensilsCrossed },
+  extra_walks: { label: 'Extra Walks', icon: Footprints },
+  training: { label: 'Training', icon: Award }
+};
 
 export const DogDetailsPage: React.FC = () => {
   const {
@@ -100,6 +119,26 @@ export const DogDetailsPage: React.FC = () => {
   const [editOwnerEmail, setEditOwnerEmail] = useState(dog?.ownerEmail || '');
   const [currentStatus, setCurrentStatus] = useState<UniversalStatus | null>(dog?.status || null);
 
+  // Sync state whenever dog data changes
+  useEffect(() => {
+    if (dog) {
+      setEditName(dog.name || '');
+      setEditBreed(dog.breed || '');
+      setEditAge(dog.age || '');
+      setEditWeight(dog.weightKg !== undefined && dog.weightKg !== null ? dog.weightKg.toString() : '');
+      setEditNotes(dog.notes || '');
+      setEditOwnerName(dog.ownerName || '');
+      setEditOwnerPhone(dog.ownerPhone || '');
+      setEditOwnerEmail(dog.ownerEmail || '');
+      setCurrentStatus(dog.status || null);
+    }
+  }, [dog]);
+
+  // Confirmation modal states
+  const [showSaveConfirmModal, setShowSaveConfirmModal] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [showCancelBookingModal, setShowCancelBookingModal] = useState(false);
+
   if (!dog) {
     return (
       <div className="card" style={{ textAlign: 'center', padding: '40px 20px' }}>
@@ -115,23 +154,49 @@ export const DogDetailsPage: React.FC = () => {
   }
 
   const handleStatusChange = (newStatus: UniversalStatus) => {
+    if (newStatus === 'CANCEL') {
+      setShowCancelBookingModal(true);
+      return;
+    }
     setCurrentStatus(newStatus);
     updateDogStatus(dog.id, newStatus);
   };
 
-  const handleSaveChanges = () => {
-    updateDog(dog.id, {
-      name: editName.trim() || dog.name,
-      breed: editBreed.trim() || dog.breed,
-      age: editAge.trim() || dog.age,
-      weightKg: editWeight ? parseFloat(editWeight) : dog.weightKg,
-      notes: editNotes.trim(),
-      ownerName: editOwnerName.trim() || dog.ownerName,
-      ownerPhone: editOwnerPhone.trim() || dog.ownerPhone,
-      ownerEmail: editOwnerEmail.trim() || dog.ownerEmail,
-      status: currentStatus
-    });
-    setIsEditing(false);
+  const handleConfirmCancelBooking = async () => {
+    try {
+      setCurrentStatus('CANCEL');
+      await updateDogStatus(dog.id, 'CANCEL');
+      setShowCancelBookingModal(false);
+    } catch (err) {
+      // Error is handled with toast in updateDogStatus
+    }
+  };
+
+  const handleInitiateSave = () => {
+    setShowSaveConfirmModal(true);
+  };
+
+  const handleConfirmSaveChanges = async () => {
+    setIsSavingProfile(true);
+    try {
+      await updateDog(dog.id, {
+        name: editName.trim() || dog.name,
+        breed: editBreed.trim() || dog.breed,
+        age: editAge.trim() || dog.age,
+        weightKg: editWeight ? parseFloat(editWeight) : dog.weightKg,
+        notes: editNotes.trim(),
+        ownerName: editOwnerName.trim() || dog.ownerName,
+        ownerPhone: editOwnerPhone.trim() || dog.ownerPhone,
+        ownerEmail: editOwnerEmail.trim() || dog.ownerEmail,
+        status: currentStatus
+      });
+      setIsEditing(false);
+      setShowSaveConfirmModal(false);
+    } catch (err) {
+      // Error handled with toast in updateDog
+    } finally {
+      setIsSavingProfile(false);
+    }
   };
 
   const handleDelete = () => {
@@ -353,6 +418,135 @@ export const DogDetailsPage: React.FC = () => {
             )}
           </div>
         </div>
+
+        {/* Additional Services Display */}
+        {activeBooking && activeBooking.services && activeBooking.services.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '6px', borderTop: '1px solid var(--color-border)' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Additional Services ({activeBooking.services.length})
+            </span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              {activeBooking.services.map((srvId) => {
+                const srv = SERVICE_META[srvId] || { label: srvId, icon: Award };
+                const Icon = srv.icon;
+                return (
+                  <span
+                    key={srvId}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '5px 10px',
+                      backgroundColor: '#eaf2ff',
+                      color: 'var(--color-primary)',
+                      borderRadius: '8px',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      border: '1px solid #bfdbfe'
+                    }}
+                  >
+                    <Icon size={14} />
+                    <span>{srv.label}</span>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Delivery Method Display */}
+        {activeBooking && activeBooking.deliveryMethod && (activeBooking.deliveryMethod.checkInMethod === 'OSCAR_PICKUP' || activeBooking.deliveryMethod.checkOutMethod === 'OSCAR_DROPOFF' || activeBooking.deliveryMethod.checkOutMethod === 'OWNER_PICKUP') && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '6px', borderTop: '1px solid var(--color-border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Truck size={15} color="var(--color-primary)" />
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Delivery Method
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <div>
+                <span style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', fontWeight: 600, display: 'block' }}>
+                  Check-In:
+                </span>
+                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                  {activeBooking.deliveryMethod.checkInMethod === 'OSCAR_PICKUP' ? 'Oscar Pickup' : 'Standard'}
+                </span>
+                {activeBooking.deliveryMethod.checkInAddress && (
+                  <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: '2px', wordBreak: 'break-word' }}>
+                    📍 {activeBooking.deliveryMethod.checkInAddress}
+                  </p>
+                )}
+              </div>
+              <div>
+                <span style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', fontWeight: 600, display: 'block' }}>
+                  Check-Out:
+                </span>
+                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                  {activeBooking.deliveryMethod.checkOutMethod === 'OSCAR_DROPOFF' ? 'Oscar Drop-off' : 'Owner Pickup'}
+                </span>
+                {activeBooking.deliveryMethod.checkOutAddress && (
+                  <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: '2px', wordBreak: 'break-word' }}>
+                    📍 {activeBooking.deliveryMethod.checkOutAddress}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Booking Notes Display */}
+        {activeBooking && activeBooking.notes && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '6px', borderTop: '1px solid var(--color-border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <FileText size={15} color="#d97706" />
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Booking Notes
+              </span>
+            </div>
+            <div
+              style={{
+                padding: '10px 12px',
+                borderRadius: '8px',
+                backgroundColor: '#fffbeb',
+                border: '1px solid #fde68a',
+                fontSize: '0.84rem',
+                color: '#92400e',
+                lineHeight: 1.45,
+                whiteSpace: 'pre-wrap'
+              }}
+            >
+              {activeBooking.notes}
+            </div>
+          </div>
+        )}
+
+        {/* Cancel Booking Action */}
+        {activeBooking && activeBooking.status !== 'CANCEL' && activeBooking.status !== 'COMPLETE' && (
+          <div style={{ paddingTop: '6px' }}>
+            <button
+              type="button"
+              onClick={() => setShowCancelBookingModal(true)}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '8px',
+                border: '1px solid #fca5a5',
+                backgroundColor: '#fef2f2',
+                color: '#b91c1c',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px'
+              }}
+            >
+              <X size={15} />
+              <span>Cancel Booking</span>
+            </button>
+          </div>
+        )}
 
         {!activeBooking && !dog.checkInDate && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
@@ -647,11 +841,12 @@ export const DogDetailsPage: React.FC = () => {
           <button
             type="button"
             className="btn-primary"
-            onClick={handleSaveChanges}
+            onClick={handleInitiateSave}
+            disabled={isSavingProfile}
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
           >
             <Check size={18} />
-            <span>Save Changes</span>
+            <span>{isSavingProfile ? 'Saving...' : 'Save Changes'}</span>
           </button>
         ) : (
           <button
@@ -861,6 +1056,178 @@ export const DogDetailsPage: React.FC = () => {
                 style={{ flex: 1.5 }}
               >
                 {isReschedulingCheckOut ? 'Saving...' : 'Confirm Reschedule'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save Profile Confirmation Modal */}
+      {showSaveConfirmModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            zIndex: 9999
+          }}
+          onClick={() => setShowSaveConfirmModal(false)}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: '380px',
+              width: '100%',
+              padding: '24px',
+              backgroundColor: '#ffffff',
+              borderRadius: '16px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div
+                style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '10px',
+                  backgroundColor: '#eaf2ff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
+                }}
+              >
+                <AlertCircle size={22} color="var(--color-primary)" />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+                  Confirm Profile Changes
+                </h3>
+                <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                  Save and update everywhere
+                </p>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '0.88rem', color: 'var(--color-text-primary)', lineHeight: 1.45 }}>
+              Are you sure you want to change these details? If confirmed, updates will apply immediately everywhere across the app.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '4px' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setShowSaveConfirmModal(false)}
+                disabled={isSavingProfile}
+                style={{ padding: '10px', fontSize: '0.85rem' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={handleConfirmSaveChanges}
+                disabled={isSavingProfile}
+                style={{ padding: '10px', fontSize: '0.85rem' }}
+              >
+                {isSavingProfile ? 'Saving...' : 'Yes, Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Booking Confirmation Modal */}
+      {showCancelBookingModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            zIndex: 9999
+          }}
+          onClick={() => setShowCancelBookingModal(false)}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: '380px',
+              width: '100%',
+              padding: '24px',
+              backgroundColor: '#ffffff',
+              borderRadius: '16px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div
+                style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '10px',
+                  backgroundColor: '#fee2e2',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
+                }}
+              >
+                <X size={22} color="#dc2626" />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+                  Cancel Booking
+                </h3>
+                <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                  Confirm cancellation
+                </p>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '0.88rem', color: 'var(--color-text-primary)', lineHeight: 1.45 }}>
+              Are you sure you want to cancel this booking? This will cancel the reservation and update the dog status to Cancel.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '4px' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setShowCancelBookingModal(false)}
+                style={{ padding: '10px', fontSize: '0.85rem' }}
+              >
+                No, Keep
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCancelBooking}
+                style={{
+                  padding: '10px',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  borderRadius: '8px',
+                  backgroundColor: '#dc2626',
+                  color: '#ffffff',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                Yes, Cancel
               </button>
             </div>
           </div>

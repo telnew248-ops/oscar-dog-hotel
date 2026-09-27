@@ -3,9 +3,18 @@ import { useApp } from '../context/AppContext';
 import { DogAvatar } from '../components/common/DogAvatar';
 import { StatusBadge } from '../components/common/StatusBadge';
 import { UniversalStatus } from '../types';
-import { Plus, ChevronLeft, ChevronRight, Phone } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, Phone, FileText, Truck, ShowerHead, Scissors, Pill, UtensilsCrossed, Footprints, Award } from 'lucide-react';
 import { getTodayDateString, addDaysToDateString, compareDateStrings, formatDisplayDate } from '../utils/date';
 import { getStatusConfig } from '../constants/statuses';
+
+const SERVICE_META: Record<string, { label: string; icon: any }> = {
+  bathing: { label: 'Bathing', icon: ShowerHead },
+  grooming: { label: 'Grooming', icon: Scissors },
+  medication: { label: 'Medication', icon: Pill },
+  special_food: { label: 'Special Food', icon: UtensilsCrossed },
+  extra_walks: { label: 'Extra Walks', icon: Footprints },
+  training: { label: 'Training', icon: Award }
+};
 
 export const BookingsPage: React.FC = () => {
   const { bookings, dogs, navigate } = useApp();
@@ -341,6 +350,96 @@ export const BookingsPage: React.FC = () => {
                     )}
                   </div>
                 </div>
+
+                {/* Services & Delivery Row */}
+                {((booking.services && booking.services.length > 0) || (booking.deliveryMethod && (booking.deliveryMethod.checkInMethod === 'OSCAR_PICKUP' || booking.deliveryMethod.checkOutMethod === 'OSCAR_DROPOFF'))) && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {booking.services && booking.services.map((srvId) => {
+                      const srv = SERVICE_META[srvId] || { label: srvId, icon: Award };
+                      const Icon = srv.icon;
+                      return (
+                        <span
+                          key={srvId}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '3px 7px',
+                            backgroundColor: '#eaf2ff',
+                            color: 'var(--color-primary)',
+                            borderRadius: '6px',
+                            fontSize: '0.72rem',
+                            fontWeight: 700
+                          }}
+                        >
+                          <Icon size={11} />
+                          <span>{srv.label}</span>
+                        </span>
+                      );
+                    })}
+
+                    {booking.deliveryMethod?.checkInMethod === 'OSCAR_PICKUP' && (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '3px 7px',
+                          backgroundColor: '#f0fdf4',
+                          color: '#15803d',
+                          borderRadius: '6px',
+                          fontSize: '0.72rem',
+                          fontWeight: 700
+                        }}
+                      >
+                        <Truck size={11} />
+                        <span>Pickup</span>
+                      </span>
+                    )}
+
+                    {booking.deliveryMethod?.checkOutMethod === 'OSCAR_DROPOFF' && (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '3px 7px',
+                          backgroundColor: '#fef3c7',
+                          color: '#b45309',
+                          borderRadius: '6px',
+                          fontSize: '0.72rem',
+                          fontWeight: 700
+                        }}
+                      >
+                        <Truck size={11} />
+                        <span>Drop-off</span>
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Notes Snippet */}
+                {booking.notes && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '6px',
+                      padding: '8px 10px',
+                      backgroundColor: '#fffbeb',
+                      borderRadius: '8px',
+                      border: '1px solid #fde68a',
+                      fontSize: '0.76rem',
+                      color: '#92400e',
+                      lineHeight: 1.35
+                    }}
+                  >
+                    <FileText size={13} style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                      {booking.notes}
+                    </span>
+                  </div>
+                )}
 
                 {/* Footer status & duration */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '4px' }}>
