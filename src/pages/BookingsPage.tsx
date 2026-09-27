@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { DogAvatar } from '../components/common/DogAvatar';
 import { StatusBadge } from '../components/common/StatusBadge';
 import { UniversalStatus } from '../types';
-import { Plus, ChevronLeft, ChevronRight, Phone, FileText, Truck, ShowerHead, Scissors, Pill, UtensilsCrossed, Footprints, Award } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, Phone, FileText, Truck, ShowerHead, Scissors, Pill, UtensilsCrossed, Footprints, Award, Share2 } from 'lucide-react';
 import { getTodayDateString, addDaysToDateString, compareDateStrings, formatDisplayDate } from '../utils/date';
 import { getStatusConfig } from '../constants/statuses';
 
@@ -17,7 +17,7 @@ const SERVICE_META: Record<string, { label: string; icon: any }> = {
 };
 
 export const BookingsPage: React.FC = () => {
-  const { bookings, dogs, navigate } = useApp();
+  const { bookings, dogs, navigate, showToast } = useApp();
 
   const todayStr = useMemo(() => getTodayDateString(), []);
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
@@ -114,6 +114,70 @@ export const BookingsPage: React.FC = () => {
 
   const shiftDate = (days: number) => {
     setSelectedDate((prev) => addDaysToDateString(prev, days));
+  };
+
+  const generateBookingShareText = (b: typeof enrichedBookings[0]): string => {
+    const dogName = b.dog?.name || 'Unknown Dog';
+    const ownerName = b.dog?.ownerName || 'Unknown Owner';
+    const nights = b.durationNights === 0 ? 'Same day' : `${b.durationNights} ${b.durationNights === 1 ? 'night' : 'nights'}`;
+    const statusLabel = getStatusConfig(b.status)?.label || b.status;
+
+    const lines: string[] = [
+      `Dog Name: ${dogName}`,
+      `Owner Name: ${ownerName}`,
+      `*Total Nights: ${nights}*`,
+      `Check in: ${b.checkInDate}${b.checkInTime ? ` at ${b.checkInTime}` : ''}`,
+      `Check out date: ${b.checkOutDate}${b.checkOutTime ? ` at ${b.checkOutTime}` : ''}`,
+      `Status: ${statusLabel}`
+    ];
+
+    if (b.services && b.services.length > 0) {
+      const serviceLabels = b.services
+        .map((s) => SERVICE_META[s]?.label || s)
+        .filter(Boolean);
+      if (serviceLabels.length > 0) {
+        lines.push(`Additional Services: ${serviceLabels.join(', ')}`);
+      }
+    }
+
+    if (b.deliveryMethod) {
+      const dm = b.deliveryMethod;
+      if (dm.checkInMethod === 'OSCAR_PICKUP') {
+        lines.push(`Delivery / Pickup Option: Oscar Pickup${dm.checkInAddress ? ` (Address: ${dm.checkInAddress})` : ''}`);
+      }
+      if (dm.checkOutMethod === 'OSCAR_DROPOFF') {
+        lines.push(`Check-out Option: Oscar Drop-off${dm.checkOutAddress ? ` (Address: ${dm.checkOutAddress})` : ''}`);
+      } else if (dm.checkOutMethod === 'OWNER_PICKUP') {
+        lines.push(`Check-out Option: Owner Pickup`);
+      }
+    }
+
+    return lines.join('\n');
+  };
+
+  const handleShareBooking = async (b: typeof enrichedBookings[0]) => {
+    const shareText = generateBookingShareText(b);
+    const title = `Booking Summary: ${b.dog?.name || 'Dog'}`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title,
+          text: shareText
+        });
+        return;
+      } catch (err: any) {
+        if (err.name === 'AbortError') return;
+        console.warn('Navigator share error, falling back to clipboard:', err);
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(shareText);
+      showToast('Booking summary copied to clipboard!', 'success');
+    } catch (err) {
+      showToast('Could not share. Please copy details manually.', 'error');
+    }
   };
 
   return (
@@ -289,26 +353,53 @@ export const BookingsPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {dog?.ownerPhone && (
-                    <a
-                      href={`tel:${dog.ownerPhone}`}
-                      onClick={(e) => e.stopPropagation()}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleShareBooking(booking);
+                      }}
                       style={{
-                        display: 'flex',
+                        display: 'inline-flex',
                         alignItems: 'center',
                         gap: '4px',
-                        fontSize: '0.78rem',
-                        fontWeight: 600,
+                        fontSize: '0.86rem',
+                        fontWeight: 700,
                         color: 'var(--color-primary)',
-                        padding: '6px 10px',
-                        background: '#edf2fa',
-                        borderRadius: '8px'
+                        background: 'none',
+                        border: 'none',
+                        padding: '2px 4px',
+                        cursor: 'pointer',
+                        lineHeight: 1
                       }}
+                      title="Share booking summary"
                     >
-                      <Phone size={12} />
-                      <span>{dog.ownerPhone}</span>
-                    </a>
-                  )}
+                      <Share2 size={13} />
+                      <span>Share</span>
+                    </button>
+
+                    {dog?.ownerPhone && (
+                      <a
+                        href={`tel:${dog.ownerPhone}`}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          fontSize: '0.78rem',
+                          fontWeight: 600,
+                          color: 'var(--color-primary)',
+                          padding: '6px 10px',
+                          background: '#edf2fa',
+                          borderRadius: '8px'
+                        }}
+                      >
+                        <Phone size={12} />
+                        <span>{dog.ownerPhone}</span>
+                      </a>
+                    )}
+                  </div>
                 </div>
 
                 {/* Dates Row */}

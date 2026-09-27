@@ -1,8 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { storageService } from '../services/storage';
 import { api } from '../services/api';
-import { Download, LogOut, Code, Camera, Check, Cloud, Database, Mail, Image as ImageIcon, Upload } from 'lucide-react';
+import { LogOut, Code, Camera, Check, Cloud, Database, Mail, Image as ImageIcon, Upload, Archive, FolderDown, CheckCircle2, X, Share2, Loader2 } from 'lucide-react';
+import { buildFullBackup, saveBackupToDevice, canShareBackupFile, shareBackupFile, BackupProgress, BackupResult } from '../services/backupExport';
 
 export const SettingsPage: React.FC = () => {
   const { settings, updateSettings, showToast, backendSession, refreshData, sessionAccount, logout } = useApp();
@@ -11,6 +11,57 @@ export const SettingsPage: React.FC = () => {
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
   const [isBackingUp, setIsBackingUp] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Backup & Recovery Export state
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [backupProgress, setBackupProgress] = useState<BackupProgress | null>(null);
+  const [backupResult, setBackupResult] = useState<BackupResult | null>(null);
+  const [isGeneratingBackup, setIsGeneratingBackup] = useState(false);
+
+  const handleStartFullBackup = async () => {
+    setIsExportModalOpen(true);
+    setIsGeneratingBackup(true);
+    setBackupResult(null);
+    setBackupProgress({
+      step: 1,
+      totalSteps: 8,
+      message: 'Connecting to Supabase Cloud...',
+      statusText: 'Starting export'
+    });
+
+    try {
+      const result = await buildFullBackup((progress) => {
+        setBackupProgress(progress);
+      });
+      setBackupResult(result);
+      showToast(`Recovery backup ready! ${result.totalRecords} records verified.`, 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to generate backup', 'error');
+    } finally {
+      setIsGeneratingBackup(false);
+    }
+  };
+
+  const handleSaveToDevice = async () => {
+    if (!backupResult) return;
+    try {
+      const saved = await saveBackupToDevice(backupResult);
+      if (saved) {
+        showToast('Backup ZIP saved to your phone storage!', 'success');
+      }
+    } catch (err: any) {
+      showToast('Failed to save file: ' + (err.message || 'Unknown error'), 'error');
+    }
+  };
+
+  const handleShareBackup = async () => {
+    if (!backupResult) return;
+    try {
+      await shareBackupFile(backupResult);
+    } catch (err: any) {
+      showToast('Sharing not available or cancelled', 'info');
+    }
+  };
 
   const handleSaveName = (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,19 +97,6 @@ export const SettingsPage: React.FC = () => {
     e.target.value = '';
   };
 
-  const handleExportData = () => {
-    const jsonString = storageService.exportData();
-    const blob = new Blob([jsonString], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `oscar_dog_hotel_backup_${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showToast('Data exported successfully!', 'success');
-  };
 
   const handleTriggerCloudBackup = async () => {
     setIsBackingUp(true);
@@ -328,22 +366,25 @@ export const SettingsPage: React.FC = () => {
 
           <button
             type="button"
-            onClick={handleExportData}
+            onClick={handleStartFullBackup}
+            disabled={isGeneratingBackup}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: '6px',
-              backgroundColor: '#e6f7f0',
-              color: '#16a36a',
-              border: '1px solid #16a36a44',
+              backgroundColor: '#1267df',
+              color: '#ffffff',
+              border: 'none',
               padding: '10px 16px',
               borderRadius: '8px',
               fontSize: '0.88rem',
-              fontWeight: 700
+              fontWeight: 700,
+              boxShadow: '0 2px 8px rgba(18, 103, 223, 0.25)',
+              cursor: 'pointer'
             }}
           >
-            <Download size={16} />
-            <span>Export Data</span>
+            <Archive size={16} />
+            <span>Export Full Backup</span>
           </button>
         </div>
       </div>
@@ -514,6 +555,246 @@ export const SettingsPage: React.FC = () => {
         <LogOut size={18} />
         <span>Log Out</span>
       </button>
+
+      {/* Full Recovery Backup Modal */}
+      {isExportModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            zIndex: 9999
+          }}
+          onClick={() => {
+            if (!isGeneratingBackup) setIsExportModalOpen(false);
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: '430px',
+              width: '100%',
+              padding: '24px',
+              backgroundColor: '#ffffff',
+              borderRadius: '16px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    backgroundColor: '#eaf2ff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--color-primary)'
+                  }}
+                >
+                  <Archive size={22} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+                    Export Full Backup
+                  </h3>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+                    Complete Supabase recovery package
+                  </p>
+                </div>
+              </div>
+
+              {!isGeneratingBackup && (
+                <button
+                  type="button"
+                  onClick={() => setIsExportModalOpen(false)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: '#64748b' }}
+                >
+                  <X size={20} />
+                </button>
+              )}
+            </div>
+
+            {/* In Progress View */}
+            {isGeneratingBackup && backupProgress && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '10px 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.82rem' }}>
+                  <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>
+                    {backupProgress.statusText || 'Processing...'}
+                  </span>
+                  <span style={{ fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+                    Step {backupProgress.step} of {backupProgress.totalSteps}
+                  </span>
+                </div>
+
+                {/* Progress bar */}
+                <div style={{ width: '100%', height: '8px', backgroundColor: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      width: `${Math.round((backupProgress.step / backupProgress.totalSteps) * 100)}%`,
+                      height: '100%',
+                      backgroundColor: 'var(--color-primary)',
+                      borderRadius: '4px',
+                      transition: 'width 0.3s ease'
+                    }}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    padding: '12px',
+                    borderRadius: '10px',
+                    backgroundColor: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    fontSize: '0.84rem',
+                    color: 'var(--color-text-primary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px'
+                  }}
+                >
+                  <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
+                  <span>{backupProgress.message}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Finished / Ready View */}
+            {!isGeneratingBackup && backupResult && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    backgroundColor: '#f0fdf4',
+                    border: '1px solid #bbf7d0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px'
+                  }}
+                >
+                  <CheckCircle2 size={22} color="#16a34a" style={{ flexShrink: 0 }} />
+                  <div>
+                    <p style={{ fontSize: '0.88rem', fontWeight: 800, color: '#15803d' }}>
+                      Database Verified & Backup Ready
+                    </p>
+                    <p style={{ fontSize: '0.78rem', color: '#166534', marginTop: '2px' }}>
+                      All {backupResult.totalRecords} records match the live Supabase database exactly.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Breakdown List */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: '8px',
+                    backgroundColor: '#f8fafc',
+                    padding: '12px',
+                    borderRadius: '10px',
+                    border: '1px solid #e2e8f0',
+                    fontSize: '0.82rem'
+                  }}
+                >
+                  <div>
+                    <span style={{ color: 'var(--color-text-secondary)', display: 'block' }}>Dogs:</span>
+                    <strong style={{ color: 'var(--color-text-primary)' }}>{backupResult.counts.dogs} profiles</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--color-text-secondary)', display: 'block' }}>Owners:</span>
+                    <strong style={{ color: 'var(--color-text-primary)' }}>{backupResult.counts.owners} contacts</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--color-text-secondary)', display: 'block' }}>Bookings:</span>
+                    <strong style={{ color: 'var(--color-text-primary)' }}>{backupResult.counts.bookings} reservations</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--color-text-secondary)', display: 'block' }}>History Logs:</span>
+                    <strong style={{ color: 'var(--color-text-primary)' }}>{backupResult.counts.statusHistory} events</strong>
+                  </div>
+                  <div style={{ gridColumn: 'span 2', borderTop: '1px solid #e2e8f0', paddingTop: '6px', marginTop: '2px' }}>
+                    <span style={{ color: 'var(--color-text-secondary)', display: 'block' }}>Archive Size:</span>
+                    <strong style={{ color: 'var(--color-text-primary)' }}>
+                      {backupResult.sizeFormatted} ({backupResult.filename})
+                    </strong>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', lineHeight: 1.4 }}>
+                  Includes self-contained <code>restore.sql</code>, database DDL, RLS policies, JSON tables, and a README for restoring into any new Supabase project. No credentials included.
+                </p>
+
+                {/* Actions */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={handleSaveToDevice}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      padding: '12px',
+                      fontSize: '0.9rem'
+                    }}
+                  >
+                    <FolderDown size={18} />
+                    <span>Save Recovery ZIP to Phone</span>
+                  </button>
+
+                  {canShareBackupFile(backupResult) && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={handleShareBackup}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        padding: '10px',
+                        fontSize: '0.85rem'
+                      }}
+                    >
+                      <Share2 size={16} />
+                      <span>Share / Send ZIP</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setIsExportModalOpen(false)}
+                    style={{
+                      padding: '8px',
+                      fontSize: '0.82rem',
+                      fontWeight: 600,
+                      color: 'var(--color-text-secondary)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

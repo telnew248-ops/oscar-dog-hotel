@@ -14,7 +14,9 @@
     "@capacitor/cli": "^7.6.9",
     "@capacitor/core": "^7.6.9",
     "@supabase/supabase-js": "^2.116.0",
+    "@types/jszip": "^3.4.0",
     "clsx": "^2.1.1",
+    "jszip": "^3.10.2",
     "lucide-react": "^1.16.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
