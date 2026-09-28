@@ -1,6 +1,9 @@
 import JSZip from 'jszip';
 import { supabase } from './supabase';
 import { getCurrentOrganizationId } from './api';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { Capacitor } from '@capacitor/core';
 
 export interface TableVerification {
   databaseCount: number;
@@ -553,10 +556,74 @@ Restoring your backend takes less than 2 minutes:
   };
 }
 
-export async function saveBackupToDevice(result: BackupResult): Promise<boolean> {
+async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Failed to read backup data'));
+    reader.onload = () => {
+      const res = reader.result as string;
+      const base64 = res.includes(',') ? res.split(',')[1] : res;
+      resolve(base64);
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function saveBackupToDevice(result: BackupResult): Promise<{ success: boolean; message?: string }> {
   const { zipBlob, filename } = result;
 
-  // 1. Try File System Access API (Android/Desktop native save dialog)
+  // 1. Android/iOS native environment via Capacitor
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const base64Data = await blobToBase64(zipBlob);
+
+      // Save to device Documents folder
+      let savedDocUri = '';
+      try {
+        const docRes = await Filesystem.writeFile({
+          path: filename,
+          data: base64Data,
+          directory: Directory.Documents,
+          recursive: true
+        });
+        savedDocUri = docRes.uri;
+      } catch (docErr) {
+        console.warn('Filesystem Documents save warning:', docErr);
+      }
+
+      // Also save to Cache for Android FileProvider sharing & folder picker
+      const cacheRes = await Filesystem.writeFile({
+        path: filename,
+        data: base64Data,
+        directory: Directory.Cache
+      });
+      const fileToOpen = cacheRes.uri || savedDocUri;
+
+      // Automatically launch Android file picker / share sheet so user can pick any folder
+      try {
+        await Share.share({
+          title: filename,
+          text: `Oscar Dog Hotel Backup: ${filename}`,
+          files: [fileToOpen],
+          dialogTitle: 'Save Backup ZIP to Folder'
+        });
+      } catch (shareErr: any) {
+        if (shareErr.name !== 'AbortError') {
+          console.warn('Share intent error:', shareErr);
+        }
+      }
+
+      return {
+        success: true,
+        message: 'Saved to phone storage! Folder picker opened to save to your chosen folder.'
+      };
+    } catch (err: any) {
+      console.error('Failed to save on device:', err);
+      throw new Error(`Failed to save backup: ${err.message || 'Storage error'}`);
+    }
+  }
+
+  // 2. Web: File System Access API
   if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
     try {
       const handle = await (window as any).showSaveFilePicker({
@@ -571,16 +638,16 @@ export async function saveBackupToDevice(result: BackupResult): Promise<boolean>
       const writable = await handle.createWritable();
       await writable.write(zipBlob);
       await writable.close();
-      return true;
+      return { success: true, message: 'Saved via folder picker!' };
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        return false; // User cancelled picker
+        return { success: false, message: 'Save cancelled' };
       }
       console.warn('showSaveFilePicker failed, using fallback download:', err);
     }
   }
 
-  // 2. Standard Blob download link for Android Download Manager / storage
+  // 3. Web: standard download fallback
   const url = URL.createObjectURL(zipBlob);
   const a = document.createElement('a');
   a.href = url;
@@ -589,10 +656,11 @@ export async function saveBackupToDevice(result: BackupResult): Promise<boolean>
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 60000);
-  return true;
+  return { success: true, message: 'Downloaded to Downloads folder!' };
 }
 
 export function canShareBackupFile(result: BackupResult): boolean {
+  if (Capacitor.isNativePlatform()) return true;
   if (typeof navigator === 'undefined' || !navigator.canShare) return false;
   try {
     const file = new File([result.zipBlob], result.filename, { type: 'application/zip' });
@@ -603,9 +671,32 @@ export function canShareBackupFile(result: BackupResult): boolean {
 }
 
 export async function shareBackupFile(result: BackupResult): Promise<boolean> {
+  const { zipBlob, filename } = result;
+
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const base64Data = await blobToBase64(zipBlob);
+      const cacheRes = await Filesystem.writeFile({
+        path: filename,
+        data: base64Data,
+        directory: Directory.Cache
+      });
+      await Share.share({
+        title: filename,
+        text: `Oscar Dog Hotel Backup: ${filename}`,
+        files: [cacheRes.uri],
+        dialogTitle: 'Share Oscar Dog Hotel Backup'
+      });
+      return true;
+    } catch (err: any) {
+      if (err.name === 'AbortError') return false;
+      throw err;
+    }
+  }
+
   if (!navigator.share) return false;
   try {
-    const file = new File([result.zipBlob], result.filename, { type: 'application/zip' });
+    const file = new File([zipBlob], filename, { type: 'application/zip' });
     await navigator.share({
       title: 'Oscar Dog Hotel Recovery Backup',
       text: `Recovery backup generated on ${result.exportedAt}. Contains ${result.totalRecords} verified records.`,
@@ -617,3 +708,4 @@ export async function shareBackupFile(result: BackupResult): Promise<boolean> {
     throw err;
   }
 }
+

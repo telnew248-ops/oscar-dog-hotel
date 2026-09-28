@@ -5,7 +5,7 @@ import { StatusSelector } from '../components/common/StatusSelector';
 import { UniversalStatus } from '../types';
 import { Plus, Check, Scissors, Pill, UtensilsCrossed, Footprints, Award, ShowerHead, RotateCcw, Search, X, Phone, Truck } from 'lucide-react';
 import { storageService } from '../services/storage';
-import { getTodayDateString, addDaysToDateString, compareDateStrings } from '../utils/date';
+import { getTodayDateString, addDaysToDateString } from '../utils/date';
 import { matchDogSearch } from '../utils/search';
 
 function to24h(timeStr: string): string {
@@ -158,20 +158,10 @@ export const NewBookingPage: React.FC = () => {
     checkOutAddress
   ]);
 
-  // Date-Aware Allowed Statuses (Requirements 9-13)
+  // Staff can select any active status on new booking create (Upcoming, In Hotel, Outgoing, Complete)
   const allowedStatuses: UniversalStatus[] = useMemo(() => {
-    const cmp = compareDateStrings(checkInDate, todayStr);
-    if (cmp < 0) {
-      // Past dates: ONLY Complete, Cancel, Received
-      return ['COMPLETE', 'CANCEL', 'RECEIVED'];
-    } else if (cmp > 0) {
-      // Future dates: ONLY Upcoming, Outgoing, In Hotel (in exact order)
-      return ['UPCOMING', 'OUTGOING', 'IN_HOTEL'];
-    } else {
-      // Today: All 6 statuses
-      return ['UPCOMING', 'OUTGOING', 'IN_HOTEL', 'RECEIVED', 'COMPLETE', 'CANCEL'];
-    }
-  }, [checkInDate, todayStr]);
+    return ['UPCOMING', 'IN_HOTEL', 'OUTGOING', 'COMPLETE'];
+  }, []);
 
   // Ensure selected status remains within allowed statuses
   useEffect(() => {

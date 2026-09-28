@@ -1,5 +1,5 @@
 import React from 'react';
-import { UNIVERSAL_STATUS_LIST, getStatusConfig } from '../../constants/statuses';
+import { STATUS_ACTION_LIST, getStatusConfig } from '../../constants/statuses';
 import { UniversalStatus } from '../../types';
 
 interface StatusSelectorProps {
@@ -15,7 +15,7 @@ export const StatusSelector: React.FC<StatusSelectorProps> = ({
   disabled = false,
   allowedStatuses
 }) => {
-  const statusList = allowedStatuses || UNIVERSAL_STATUS_LIST;
+  const statusList = allowedStatuses || STATUS_ACTION_LIST;
 
   return (
     <div

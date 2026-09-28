@@ -238,6 +238,12 @@ export function pickRelevantBooking(bookings: any[], currentTime: Date = new Dat
     .sort((a, b) => new Date(b.check_out_at || b.checkOutAt).getTime() - new Date(a.check_out_at || a.checkOutAt).getTime())[0];
   if (nonCancelled) return formatBookingResponse(nonCancelled, currentTime);
 
+  // 6. Most recent cancelled booking (ensures cancelled dogs show Cancel status rather than falling back to default)
+  const cancelled = bookings
+    .filter((b) => (b.current_status || b.status) === 'CANCEL')
+    .sort((a, b) => new Date(b.updated_at || b.created_at || b.check_out_at || 0).getTime() - new Date(a.updated_at || a.created_at || a.check_out_at || 0).getTime())[0];
+  if (cancelled) return formatBookingResponse(cancelled, currentTime);
+
   return null;
 }
 
@@ -249,6 +255,17 @@ export function formatBookingResponse(b: any, currentTime: Date = new Date()) {
   const checkOutDate = b.check_out_at || b.checkOutAt;
   const attention = getCheckoutAttentionState(b, currentTime);
   const duration = calculateStayDuration(checkInDate, checkOutDate);
+  const todayStr = toDateString(currentTime);
+  const outDateStr = toDateString(checkOutDate);
+
+  let rawStatus = b.current_status || b.status;
+  // Auto Outgoing rule: On check-out date (from 00:00 start of date),
+  // any non-cancelled and non-completed booking automatically becomes OUTGOING
+  if (rawStatus && rawStatus !== 'CANCEL' && rawStatus !== 'COMPLETE') {
+    if (outDateStr === todayStr) {
+      rawStatus = 'OUTGOING';
+    }
+  }
 
   const services = Array.isArray(b.services)
     ? b.services
@@ -265,9 +282,9 @@ export function formatBookingResponse(b: any, currentTime: Date = new Date()) {
     check_in_at: checkInDate,
     checkOutAt: checkOutDate,
     check_out_at: checkOutDate,
-    currentStatus: b.current_status || b.status,
-    current_status: b.current_status || b.status,
-    status: b.current_status || b.status,
+    currentStatus: rawStatus,
+    current_status: rawStatus,
+    status: rawStatus,
     services,
     notes: b.notes,
     deliveryMethod: b.delivery_method || b.deliveryMethod || undefined,
@@ -1110,19 +1127,24 @@ export const api = {
         throw new ApiError(404, 'BOOKING_NOT_FOUND', 'Booking not found');
       }
 
-      // Status lifecycle validation (Requirement 19)
+      // Status lifecycle validation
       const fromStatus = current.current_status;
       const toStatus = status;
+
+      if (fromStatus === toStatus) {
+        return formatBookingResponse(current);
+      }
+
       const ALLOWED_TRANSITIONS: Record<string, string[]> = {
-        UPCOMING: ['RECEIVED', 'IN_HOTEL', 'CANCEL'],
-        RECEIVED: ['IN_HOTEL', 'CANCEL', 'OUTGOING', 'COMPLETE'],
-        IN_HOTEL: ['OUTGOING', 'COMPLETE', 'CANCEL'],
-        OUTGOING: ['COMPLETE', 'IN_HOTEL', 'CANCEL'],
-        COMPLETE: [],
-        CANCEL: []
+        UPCOMING: ['RECEIVED', 'IN_HOTEL', 'OUTGOING', 'COMPLETE', 'CANCEL'],
+        RECEIVED: ['IN_HOTEL', 'OUTGOING', 'COMPLETE', 'CANCEL'],
+        IN_HOTEL: ['OUTGOING', 'COMPLETE', 'CANCEL', 'UPCOMING'],
+        OUTGOING: ['COMPLETE', 'IN_HOTEL', 'CANCEL', 'UPCOMING'],
+        COMPLETE: ['IN_HOTEL', 'OUTGOING', 'CANCEL'],
+        CANCEL: ['UPCOMING', 'IN_HOTEL', 'OUTGOING', 'CANCEL']
       };
 
-      if (fromStatus !== toStatus && ALLOWED_TRANSITIONS[fromStatus] && !ALLOWED_TRANSITIONS[fromStatus].includes(toStatus)) {
+      if (ALLOWED_TRANSITIONS[fromStatus] && !ALLOWED_TRANSITIONS[fromStatus].includes(toStatus)) {
         throw new ApiError(
           400,
           'INVALID_STATUS_TRANSITION',

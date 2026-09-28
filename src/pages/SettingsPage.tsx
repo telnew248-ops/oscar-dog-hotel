@@ -45,9 +45,9 @@ export const SettingsPage: React.FC = () => {
   const handleSaveToDevice = async () => {
     if (!backupResult) return;
     try {
-      const saved = await saveBackupToDevice(backupResult);
-      if (saved) {
-        showToast('Backup ZIP saved to your phone storage!', 'success');
+      const res = await saveBackupToDevice(backupResult);
+      if (res.success) {
+        showToast(res.message || 'Backup ZIP saved to your phone storage!', 'success');
       }
     } catch (err: any) {
       showToast('Failed to save file: ' + (err.message || 'Unknown error'), 'error');

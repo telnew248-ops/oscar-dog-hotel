@@ -43,13 +43,13 @@ export const DogDetailsPage: React.FC = () => {
     getDogById,
     updateDog,
     updateDogStatus,
+    updateBookingStatus,
     deleteDog,
     goBack,
     navigate,
     bookings,
     rescheduleCheckIn,
     rescheduleCheckOut,
-    confirmOutgoing,
     showToast
   } = useApp();
   const dog = selectedDogId ? getDogById(selectedDogId) : undefined;
@@ -91,6 +91,12 @@ export const DogDetailsPage: React.FC = () => {
       .sort((a, b) => new Date(b.checkOutDate).getTime() - new Date(a.checkOutDate).getTime())[0];
     if (completed) return completed;
 
+    // 5. Most recent cancelled
+    const cancelled = [...dogBookings]
+      .filter((b) => b.status === 'CANCEL')
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime())[0];
+    if (cancelled) return cancelled;
+
     return dogBookings[0];
   }, [dogBookings]);
 
@@ -130,9 +136,9 @@ export const DogDetailsPage: React.FC = () => {
       setEditOwnerName(dog.ownerName || '');
       setEditOwnerPhone(dog.ownerPhone || '');
       setEditOwnerEmail(dog.ownerEmail || '');
-      setCurrentStatus(dog.status || null);
+      setCurrentStatus(activeBooking?.status || dog.status || null);
     }
-  }, [dog]);
+  }, [dog, activeBooking?.status]);
 
   // Confirmation modal states
   const [showSaveConfirmModal, setShowSaveConfirmModal] = useState(false);
@@ -153,22 +159,31 @@ export const DogDetailsPage: React.FC = () => {
     );
   }
 
-  const handleStatusChange = (newStatus: UniversalStatus) => {
+  const handleStatusChange = async (newStatus: UniversalStatus) => {
     if (newStatus === 'CANCEL') {
       setShowCancelBookingModal(true);
       return;
     }
     setCurrentStatus(newStatus);
-    updateDogStatus(dog.id, newStatus);
+    if (activeBooking) {
+      await updateBookingStatus(activeBooking.id, newStatus);
+    } else {
+      await updateDogStatus(dog.id, newStatus);
+    }
   };
 
   const handleConfirmCancelBooking = async () => {
     try {
       setCurrentStatus('CANCEL');
-      await updateDogStatus(dog.id, 'CANCEL');
+      if (activeBooking) {
+        await updateBookingStatus(activeBooking.id, 'CANCEL');
+      } else {
+        await updateDogStatus(dog.id, 'CANCEL');
+      }
       setShowCancelBookingModal(false);
-    } catch (err) {
-      // Error is handled with toast in updateDogStatus
+      showToast('Booking cancelled successfully', 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to cancel booking', 'error');
     }
   };
 
@@ -254,16 +269,6 @@ export const DogDetailsPage: React.FC = () => {
       showToast(err.message || 'Failed to reschedule check-out', 'error');
     } finally {
       setIsReschedulingCheckOut(false);
-    }
-  };
-
-  const handleConfirmDeparture = async () => {
-    if (!activeBooking) return;
-    try {
-      await confirmOutgoing(activeBooking.id);
-      setCurrentStatus('OUTGOING');
-    } catch (err: any) {
-      showToast(err.message || 'Failed to confirm departure', 'error');
     }
   };
 
@@ -356,7 +361,7 @@ export const DogDetailsPage: React.FC = () => {
                 </p>
               )}
             </div>
-            {activeBooking && (
+            {activeBooking && activeBooking.status !== 'CANCEL' && (
               <button
                 type="button"
                 className="btn-secondary"
@@ -393,7 +398,7 @@ export const DogDetailsPage: React.FC = () => {
                 </p>
               )}
             </div>
-            {activeBooking && (
+            {activeBooking && activeBooking.status !== 'CANCEL' && (
               <button
                 type="button"
                 className="btn-secondary"
@@ -548,6 +553,24 @@ export const DogDetailsPage: React.FC = () => {
           </div>
         )}
 
+        {activeBooking && activeBooking.status === 'CANCEL' && (
+          <div
+            style={{
+              paddingTop: '6px',
+              padding: '10px 14px',
+              borderRadius: '8px',
+              backgroundColor: '#fef2f2',
+              border: '1.5px solid #fca5a5',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px'
+            }}
+          >
+            <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#b91c1c' }}>✕ This reservation is cancelled</span>
+          </div>
+        )}
+
         {!activeBooking && !dog.checkInDate && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
             <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
@@ -636,7 +659,7 @@ export const DogDetailsPage: React.FC = () => {
           </div>
 
           <StatusSelector
-            currentStatus={dog.status || 'UPCOMING'}
+            currentStatus={activeBooking?.status || dog.status || 'UPCOMING'}
             onSelect={handleStatusChange}
           />
         </div>
@@ -648,14 +671,33 @@ export const DogDetailsPage: React.FC = () => {
           <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
             Stay Management
           </h3>
-          <div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <button
               type="button"
               className="btn-primary"
-              onClick={handleConfirmDeparture}
-              style={{ width: '100%', padding: '10px', fontSize: '0.85rem', backgroundColor: '#1267df' }}
+              onClick={async () => {
+                try {
+                  await updateBookingStatus(activeBooking.id, 'COMPLETE');
+                  showToast('Stay marked as Complete!', 'success');
+                } catch (err: any) {
+                  showToast(err.message || 'Failed to complete stay', 'error');
+                }
+              }}
+              style={{ width: '100%', padding: '11px', fontSize: '0.88rem', backgroundColor: '#5336df' }}
             >
-              Confirm Departure
+              Complete Stay
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                setNewCheckOutDate(activeBooking.checkOutDate || '');
+                setNewCheckOutTime(activeBooking.checkOutTime || '10:00 AM');
+                setShowRescheduleCheckOutModal(true);
+              }}
+              style={{ width: '100%', padding: '10px', fontSize: '0.85rem' }}
+            >
+              Reschedule Check-Out
             </button>
           </div>
         </div>

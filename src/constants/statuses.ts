@@ -70,6 +70,18 @@ export const UNIVERSAL_STATUS_LIST: UniversalStatus[] = [
   'OUTGOING'
 ];
 
+/**
+ * Status Action list for user action selectors:
+ * Excludes RECEIVED (transitions from UPCOMING go straight to IN_HOTEL)
+ * Excludes CANCEL (handled via dedicated "Cancel Booking" action with confirmation)
+ */
+export const STATUS_ACTION_LIST: UniversalStatus[] = [
+  'UPCOMING',
+  'IN_HOTEL',
+  'OUTGOING',
+  'COMPLETE'
+];
+
 export const NO_RESERVATION_CONFIG: StatusConfig = {
   id: 'NO_RESERVATION' as any,
   label: 'No reservation',

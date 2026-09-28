@@ -113,7 +113,7 @@ function mapBackendDogToFrontend(d: any): Dog {
 
   // status is null when the dog has no reservation — NEVER default to 'RECEIVED'
   const rawStatus = d.currentStatus || d.status;
-  const status = (rawStatus && rawStatus !== 'No active booking') ? rawStatus as UniversalStatus : null;
+  let status = (rawStatus && rawStatus !== 'No active booking') ? rawStatus as UniversalStatus : null;
 
   const booking = d.currentBooking;
   // dates/times are null when there is no booking — NEVER use hardcoded fallback dates
@@ -121,6 +121,13 @@ function mapBackendDogToFrontend(d: any): Dog {
   const checkInTime = booking ? (booking.checkInLocal?.timeFormatted || d.checkInTime || null) : (d.checkInTime || null);
   const checkOutDate = booking ? (booking.checkOutLocal?.dateFormatted || booking.checkOutAt?.split('T')[0] || d.checkOutDate || null) : (d.checkOutDate || null);
   const checkOutTime = booking ? (booking.checkOutLocal?.timeFormatted || d.checkOutTime || null) : (d.checkOutTime || null);
+
+  const todayStr = getTodayDateString();
+  if (status && status !== 'CANCEL' && status !== 'COMPLETE') {
+    if (checkOutDate && toDateString(checkOutDate) === todayStr) {
+      status = 'OUTGOING';
+    }
+  }
 
   const dob = d.dateOfBirth || d.date_of_birth || d.dob;
   const age = dob
@@ -153,6 +160,17 @@ function mapBackendDogToFrontend(d: any): Dog {
 function mapBackendBookingToFrontend(b: any): Booking {
   const checkInDate = toDateString(b.check_in_at || b.checkInAt);
   const checkOutDate = toDateString(b.check_out_at || b.checkOutAt);
+  const todayStr = getTodayDateString();
+  let status = (b.currentStatus || b.current_status || b.status || 'UPCOMING') as UniversalStatus;
+
+  // Auto Outgoing rule: On check-out date (from 00:00 start of date),
+  // any non-cancelled and non-completed booking automatically becomes OUTGOING
+  if (status !== 'CANCEL' && status !== 'COMPLETE') {
+    if (checkOutDate === todayStr) {
+      status = 'OUTGOING';
+    }
+  }
+
   return {
     id: b.id,
     dogId: b.dogId || b.dog_id,
@@ -161,7 +179,7 @@ function mapBackendBookingToFrontend(b: any): Booking {
     checkInTime: b.checkInLocal?.timeFormatted || (b.check_in_at ? formatTimeFromDate(b.check_in_at) : '') || '10:00 AM',
     checkOutDate,
     checkOutTime: b.checkOutLocal?.timeFormatted || (b.check_out_at ? formatTimeFromDate(b.check_out_at) : '') || '10:00 AM',
-    status: (b.currentStatus || b.current_status || b.status || 'UPCOMING') as UniversalStatus,
+    status,
     services: Array.isArray(b.services) ? b.services : (typeof b.services === 'string' ? JSON.parse(b.services) : []),
     notes: b.notes,
     deliveryMethod: b.deliveryMethod || b.delivery_method || undefined,
@@ -551,14 +569,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     notes?: string
   ) => {
     try {
-      // Find active booking for this dog
-      const activeBooking = bookings.find((b) => b.dogId === id);
+      // Find active booking for this dog prioritizing active stay or upcoming
+      const activeBooking =
+        bookings.find((b) => b.dogId === id && b.status !== 'CANCEL' && b.status !== 'COMPLETE') ||
+        bookings.find((b) => b.dogId === id);
 
       if (activeBooking) {
-        await api.bookings.updateBookingStatus(activeBooking.id, newStatus, effectiveAt, notes);
+        await updateBookingStatus(activeBooking.id, newStatus, effectiveAt, notes);
+      } else {
+        setDogs((prev) => prev.map((d) => (d.id === id ? { ...d, status: newStatus } : d)));
+        showToast(`Status updated to "${newStatus.replace('_', ' ')}"`, 'success');
+        await refreshData();
       }
-      showToast(`Status updated to "${newStatus.replace('_', ' ')}"`, 'success');
-      await refreshData();
     } catch (err: any) {
       showToast(err.message || 'Failed to update status', 'error');
       throw err;
@@ -647,11 +669,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     notes?: string
   ) => {
     try {
+      // 1. Immediate optimistic UI update across bookings and dogs
+      setBookings((prev) =>
+        prev.map((b) => (b.id === id ? { ...b, status: newStatus } : b))
+      );
+      const targetBooking = bookings.find((b) => b.id === id);
+      if (targetBooking?.dogId) {
+        setDogs((prev) =>
+          prev.map((d) => (d.id === targetBooking.dogId ? { ...d, status: newStatus } : d))
+        );
+      }
+
+      // 2. Persist to backend Supabase
       await api.bookings.updateBookingStatus(id, newStatus, effectiveAt, notes);
-      showToast(`Booking status updated to "${newStatus}"`, 'success');
+      showToast(`Status updated to "${newStatus.replace('_', ' ')}"`, 'success');
       await refreshData();
     } catch (err: any) {
       showToast(err.message || 'Failed to update booking status', 'error');
+      await refreshData();
       throw err;
     }
   };

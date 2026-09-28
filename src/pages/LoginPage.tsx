@@ -24,7 +24,7 @@ export const LoginPage: React.FC = () => {
     e.preventDefault();
     setError(null);
     if (!staffIdentifier.trim()) {
-      setError('Please enter your staff mobile or account number.');
+      setError('Please enter your mobile or account number.');
       return;
     }
     if (!staffPassword) {
@@ -167,7 +167,7 @@ export const LoginPage: React.FC = () => {
             }}
           >
             <Shield size={16} />
-            <span>Staff Login</span>
+            <span>Log In</span>
           </button>
           <button
             type="button"
@@ -310,7 +310,7 @@ export const LoginPage: React.FC = () => {
                   boxShadow: '0 4px 12px rgba(18, 103, 223, 0.25)'
                 }}
               >
-                {isLoading ? 'Signing In...' : 'Log In as Staff'}
+                {isLoading ? 'Signing In...' : 'Log In'}
               </button>
             </form>
           ) : (

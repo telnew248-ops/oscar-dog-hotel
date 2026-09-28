@@ -218,19 +218,19 @@ export function classifyBooking(
     return 'MISSED_CHECKIN';
   }
 
-  // 2. Overdue Check-out: Dog in hotel / outgoing unconfirmed, scheduled check-out has passed
-  if ((status === 'IN_HOTEL' || status === 'OUTGOING') && !booking.isOutgoingConfirmed && outMs < nowMs) {
+  // 2. Overdue Check-out: check-out date has passed (or passed scheduled checkout time today) and booking is not completed
+  if (status !== 'CANCEL' && status !== 'COMPLETE' && (outDateStr < referenceDateStr || (!booking.isOutgoingConfirmed && outMs < nowMs))) {
     return 'OVERDUE_CHECKOUT';
   }
 
-  // 3. Arriving Today
-  if (inDateStr === referenceDateStr && status === 'UPCOMING') {
-    return 'TODAY_CHECKIN';
+  // 3. Departing Today (Today's Outgoing)
+  if (outDateStr === referenceDateStr && status !== 'CANCEL' && status !== 'COMPLETE') {
+    return 'TODAY_CHECKOUT';
   }
 
-  // 4. Departing Today
-  if (outDateStr === referenceDateStr && (status === 'IN_HOTEL' || status === 'OUTGOING')) {
-    return 'TODAY_CHECKOUT';
+  // 4. Arriving Today
+  if (inDateStr === referenceDateStr && status === 'UPCOMING') {
+    return 'TODAY_CHECKIN';
   }
 
   // 5. Currently Active in Hotel

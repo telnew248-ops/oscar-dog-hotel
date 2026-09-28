@@ -61,18 +61,18 @@ export const BookingsPage: React.FC = () => {
     return enrichedBookings.filter((b) => isBookingRelevantToDate(b, selectedDate));
   }, [enrichedBookings, selectedDate]);
 
-  // Date-Aware Status Rules (Requirements 9, 10, 11, 12, 13)
+  // Date-Aware Status Rules
   const allowedStatuses: UniversalStatus[] = useMemo(() => {
     const cmp = compareDateStrings(selectedDate, todayStr);
     if (cmp < 0) {
-      // Past dates: ONLY Complete, Cancel, Received
-      return ['COMPLETE', 'CANCEL', 'RECEIVED'];
+      // Past dates: Complete, Cancel
+      return ['COMPLETE', 'CANCEL'];
     } else if (cmp > 0) {
-      // Future dates: ONLY Upcoming, Outgoing, In Hotel (in exact order: 1. Upcoming, 2. Outgoing, 3. In Hotel)
+      // Future dates: Upcoming, Outgoing, In Hotel
       return ['UPCOMING', 'OUTGOING', 'IN_HOTEL'];
     } else {
-      // Today: Show only today’s dog activities: Outgoing, Complete, Received, Upcoming, or Cancelled (Requirement 2)
-      return ['OUTGOING', 'COMPLETE', 'RECEIVED', 'UPCOMING', 'CANCEL'];
+      // Today: Outgoing (first for Today's Outgoing), In Hotel, Complete, Upcoming, Cancel
+      return ['OUTGOING', 'IN_HOTEL', 'COMPLETE', 'UPCOMING', 'CANCEL'];
     }
   }, [selectedDate, todayStr]);
 
